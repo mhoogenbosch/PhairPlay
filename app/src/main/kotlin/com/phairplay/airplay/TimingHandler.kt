@@ -52,8 +52,8 @@ import java.net.DatagramSocket
  */
 class TimingHandler {
 
-    // The UDP socket — null when not running
-    private var socket: DatagramSocket? = null
+    // The UDP socket — null when not running; @Volatile so stop() is visible to runLoop()
+    @Volatile private var socket: DatagramSocket? = null
 
     /**
      * Estimated offset between our local clock and the sender's RTP timestamp clock,
@@ -102,7 +102,9 @@ class TimingHandler {
 
     private fun runLoop(scope: CoroutineScope, port: Int) {
         try {
-            socket = DatagramSocket(port)
+            // Use a local val to avoid repeated null-checks on the @Volatile field
+            val sock = DatagramSocket(port)
+            socket = sock
             Logger.i("Timing handler listening on UDP port $port")
 
             val buf = ByteArray(PACKET_SIZE)
@@ -110,7 +112,7 @@ class TimingHandler {
 
             while (scope.isActive) {
                 // receive() blocks until a packet arrives or socket is closed
-                socket!!.receive(packet)
+                sock.receive(packet)
                 val receiveNtp = currentNtpTimestamp()
                 handleProbe(packet, receiveNtp)
             }
@@ -152,7 +154,8 @@ class TimingHandler {
         val response = ByteArray(PACKET_SIZE)
         response[0] = 0x80.toByte()
         response[1] = RESPONSE_TYPE.toByte()
-        response[2] = data[2]; response[3] = data[3]  // echo sequence number
+        response[2] = data[2]  // echo sequence high byte
+        response[3] = data[3]  // echo sequence low byte
 
         // [8-15] reference = sender's transmit time (from request [24-31])
         writeUint32(response, 8,  refSec)

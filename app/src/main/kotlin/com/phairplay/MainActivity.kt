@@ -1,15 +1,25 @@
 package com.phairplay
 
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.os.Bundle
+import android.os.IBinder
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import com.phairplay.service.PhairPlayService
+import com.phairplay.service.ProtocolState
 import com.phairplay.service.ServiceController
 import com.phairplay.ui.HomeFragment
 import com.phairplay.ui.SettingsFragment
 import com.phairplay.ui.StreamingScreen
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import timber.log.Timber
 
 /**
@@ -41,6 +51,30 @@ class MainActivity : AppCompatActivity() {
     // The SurfaceView for full-screen video output
     private lateinit var streamingScreen: StreamingScreen
 
+    // Service binding — gives access to state flows for showing/hiding the streaming overlay
+    private var service: PhairPlayService? = null
+    private var isBound = false
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            service = (binder as? PhairPlayService.LocalBinder)?.getService()
+            isBound = true
+            Timber.d("MainActivity: bound to PhairPlayService")
+
+            // Wire the streaming Surface so the service can pass it to VideoDecoder
+            service?.setVideoSurfaceProvider { getVideoSurface() }
+
+            // Show/hide the streaming overlay whenever AirPlay state changes
+            observeStreamingState()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            service = null
+            isBound = false
+            Timber.d("MainActivity: unbound from PhairPlayService")
+        }
+    }
+
     // Currently selected nav item index (0 = Home, 1 = Settings)
     private var selectedNavIndex = 0
 
@@ -60,6 +94,23 @@ class MainActivity : AppCompatActivity() {
 
         // Start the service immediately so it's running before any sender discovers us
         ServiceController.start(this)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Bind so we can observe StateFlows and supply the video Surface
+        val intent = Intent(this, PhairPlayService::class.java)
+        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Clear surface reference before unbinding to avoid holding a dead Surface
+        service?.setVideoSurfaceProvider { null }
+        if (isBound) {
+            unbindService(serviceConnection)
+            isBound = false
+        }
     }
 
     override fun onDestroy() {
@@ -161,4 +212,26 @@ class MainActivity : AppCompatActivity() {
 
     /** Returns the SurfaceView Surface for the VideoDecoder. */
     fun getVideoSurface() = streamingScreen.getSurface()
+
+    // ─── Streaming overlay ────────────────────────────────────────────────────
+
+    /**
+     * Observes [PhairPlayService.airPlayState] and shows or hides the full-screen
+     * streaming overlay accordingly.
+     *
+     * Called once after the service is bound. The coroutine is automatically cancelled
+     * by [lifecycleScope] when the Activity stops.
+     */
+    private fun observeStreamingState() {
+        val svc = service ?: return
+        lifecycleScope.launch {
+            svc.airPlayState.collectLatest { state ->
+                if (state == ProtocolState.CONNECTED) {
+                    showStreamingScreen()
+                } else {
+                    hideStreamingScreen()
+                }
+            }
+        }
+    }
 }

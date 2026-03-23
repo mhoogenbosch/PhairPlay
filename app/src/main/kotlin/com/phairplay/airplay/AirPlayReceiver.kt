@@ -63,7 +63,7 @@ class AirPlayReceiver(
     private var audioPlayer: AudioPlayer? = null
 
     // UDP socket for receiving audio RTP packets — opened after RECORD, closed on TEARDOWN
-    private var audioSocket: DatagramSocket? = null
+    @Volatile private var audioSocket: DatagramSocket? = null
 
     /**
      * Starts the AirPlay receiver.

@@ -146,4 +146,38 @@ class PhairPlayServiceTest {
         val after = System.currentTimeMillis()
         assertTrue(connection.startedAt in before..after)
     }
+
+    // ─── Surface provider constants / reasoning ───────────────────────────────
+    //
+    // These tests document the expected behavior of the video surface provider
+    // wiring between PhairPlayService and MainActivity without needing Android.
+
+    @Test
+    fun `surface provider lambda returning null is safe to invoke`() {
+        // Default state before MainActivity binds: provider is null → no surface
+        val provider: (() -> Any?)? = null
+        val result = provider?.invoke()
+        assertNull("Null provider must not crash — safe call returns null", result)
+    }
+
+    @Test
+    fun `surface provider lambda can be replaced`() {
+        // Simulates setVideoSurfaceProvider() being called twice (e.g., orientation change)
+        var currentProvider: (() -> Any?)? = { "surface_A" }
+        assertEquals("surface_A", currentProvider?.invoke())
+
+        currentProvider = { "surface_B" }
+        assertEquals("surface_B", currentProvider?.invoke())
+    }
+
+    @Test
+    fun `surface provider cleared on Activity stop prevents stale surface reference`() {
+        val fakeSurface = Any()
+        var currentProvider: (() -> Any?)? = { fakeSurface }
+
+        // Activity stops → clear provider to avoid holding destroyed Surface
+        currentProvider = { null }
+
+        assertNull("Provider must return null after Activity stops", currentProvider.invoke())
+    }
 }

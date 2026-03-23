@@ -523,39 +523,11 @@ class RtspHandler(
 
         /**
          * UDP port for receiving audio RTP packets.
-         * Defined in [AirPlayReceiver] and referenced here so the SETUP response
-         * advertises the same port that [AirPlayReceiver] is listening on.
+         * Must match [AirPlayReceiver.AUDIO_RTP_PORT] — both values must be kept in sync.
+         * We keep a separate const here to avoid a circular compile-time dependency.
          */
-        private val AUDIO_RTP_PORT = AirPlayReceiver.AUDIO_RTP_PORT
+        private const val AUDIO_RTP_PORT = 6001
     }
 }
 
-/**
- * RtspRequest — Represents a parsed RTSP request from the client.
- *
- * @param method  The RTSP method (e.g., "OPTIONS", "ANNOUNCE", "RECORD")
- * @param uri     The request URI (e.g., "rtsp://192.168.1.1/phairplay")
- * @param headers All headers as a key→value map (case-sensitive keys)
- * @param body    The request body (empty string if no body)
- */
-data class RtspRequest(
-    val method: String,
-    val uri: String,
-    val headers: Map<String, String>,
-    val body: String
-)
-
-/**
- * RtspResponse — Represents an RTSP response to send to the client.
- *
- * @param statusCode    HTTP-like status code (200 = OK, 503 = unavailable, etc.)
- * @param statusMessage Human-readable status (e.g., "OK", "Not Found")
- * @param headers       Optional extra headers to include in the response
- * @param body          Optional response body (e.g., SDP content)
- */
-data class RtspResponse(
-    val statusCode: Int,
-    val statusMessage: String,
-    val headers: Map<String, String> = emptyMap(),
-    val body: String = ""
-)
+// RtspRequest and RtspResponse are defined in RtspMessages.kt

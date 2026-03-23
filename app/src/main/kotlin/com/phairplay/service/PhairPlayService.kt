@@ -13,6 +13,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.phairplay.MainActivity
 import com.phairplay.R
+import android.view.Surface
 import com.phairplay.airplay.AirPlayReceiver
 import com.phairplay.cast.CastReceiver
 import com.phairplay.miracast.MiracastReceiver
@@ -73,6 +74,11 @@ class PhairPlayService : Service() {
     private val _activeConnection = MutableStateFlow<ActiveConnection?>(null)
     val activeConnection: StateFlow<ActiveConnection?> = _activeConnection.asStateFlow()
 
+    // Surface provider — supplied by MainActivity after binding (Sprint 5).
+    // The lambda captures this field so it always uses the latest provider even if
+    // setVideoSurfaceProvider() is called after startAirPlay().
+    @Volatile private var videoSurfaceProvider: (() -> Surface?)? = null
+
     // Receiver instances — null when not running
     private var airPlayReceiver: AirPlayReceiver? = null
     private var miracastReceiver: MiracastReceiver? = null
@@ -106,6 +112,22 @@ class PhairPlayService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
+
+    /**
+     * Called by [MainActivity] after it binds, to supply the [Surface] for video rendering.
+     *
+     * The lambda is invoked lazily — only when a stream is actually being started — so it
+     * is safe to call this before or after [startAirPlay]. The lambda should return null
+     * if the Activity's StreamingScreen is not yet available (e.g., surface not yet created).
+     *
+     * Call with `{ null }` (or simply don't call) during Activity destruction so we stop
+     * holding a reference to the Activity's Surface after the window is gone.
+     *
+     * @param provider Lambda that returns the current [Surface], or null if unavailable.
+     */
+    fun setVideoSurfaceProvider(provider: () -> Surface?) {
+        videoSurfaceProvider = provider
+    }
 
     override fun onDestroy() {
         Logger.i("PhairPlayService destroying")
@@ -177,7 +199,9 @@ class PhairPlayService : Service() {
         airPlayReceiver = AirPlayReceiver(
             context = applicationContext,
             displayName = settings.effectiveDisplayName,
-            videoSurfaceProvider = { null },  // wired from MainActivity in Sprint 5
+            // Delegate to the current provider at call time — captures the field, not a fixed value.
+            // When MainActivity calls setVideoSurfaceProvider(), future surface requests use it.
+            videoSurfaceProvider = { videoSurfaceProvider?.invoke() },
             onStateChanged = { state ->
                 _airPlayState.value = state
                 when (state) {
