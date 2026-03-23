@@ -32,20 +32,24 @@ jobs:
       - name: Grant Gradle wrapper execute permission
         run: chmod +x gradlew
 
-      # Step 4: Ensure Android SDK platform 34 is available
-      - name: Set up Android SDK components
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1 || true
+      # Step 4: Set up Android SDK with required components
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0'
 
       # Step 5: Build the Google TV debug APK
       # This verifies that the googletv flavor compiles without errors
       - name: Build Google TV (debug)
         run: |
           mkdir -p app/build/reports
-          ./gradlew assembleGoogletvDebug --stacktrace 2>&1 | tee app/build/reports/build-error.txt; exit ${PIPESTATUS[0]}
+          ./gradlew assembleGoogletvDebug --stacktrace 2>&1 | tee app/build/reports/build-error.txt
+          BUILD_EXIT=${PIPESTATUS[0]}
+          if [ $BUILD_EXIT -ne 0 ]; then
+            echo "=== BUILD FAILED — last 100 lines ==="
+            tail -100 app/build/reports/build-error.txt
+          fi
+          exit $BUILD_EXIT
 
       # Step 6: Build the Fire TV debug APK
       # This verifies that the firetv flavor compiles without errors
