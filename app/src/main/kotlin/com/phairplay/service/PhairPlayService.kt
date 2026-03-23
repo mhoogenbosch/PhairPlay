@@ -14,7 +14,6 @@ import androidx.core.app.NotificationCompat
 import com.phairplay.MainActivity
 import com.phairplay.R
 import com.phairplay.airplay.AirPlayReceiver
-import com.phairplay.airplay.AirPlayState
 import com.phairplay.cast.CastReceiver
 import com.phairplay.miracast.MiracastReceiver
 import com.phairplay.settings.AppSettings
@@ -130,7 +129,7 @@ class PhairPlayService : Service() {
         _serviceState.value = ServiceState.Running
         updateNotification(isRunning = true)
 
-        if (settings.airPlayEnabled)   startAirPlay()
+        if (settings.airPlayEnabled)   startAirPlay(settings)
         if (settings.miracastEnabled)  startMiracast()
         if (settings.castEnabled)      startCast()
     }
@@ -162,25 +161,35 @@ class PhairPlayService : Service() {
 
     // ─── Individual Protocol Starters ────────────────────────────────────────
 
-    private fun startAirPlay() {
-        _airPlayState.value = ProtocolState.ADVERTISING
+    /**
+     * Creates and starts the [AirPlayReceiver].
+     *
+     * The display name comes from settings — blank means use the Android device name,
+     * which [MdnsService] resolves at runtime.
+     *
+     * Surface is not available here (it lives in the Activity/Fragment).
+     * The surface provider is wired up from [MainActivity] in Sprint 5.
+     * Until then, video frames are silently discarded and only audio plays.
+     *
+     * @param settings Current app settings; read once per start/restart cycle.
+     */
+    private fun startAirPlay(settings: AppSettings) {
         airPlayReceiver = AirPlayReceiver(
             context = applicationContext,
-            videoSurfaceProvider = { null }, // surface is only available when streaming
+            displayName = settings.effectiveDisplayName,
+            videoSurfaceProvider = { null },  // wired from MainActivity in Sprint 5
             onStateChanged = { state ->
+                _airPlayState.value = state
                 when (state) {
-                    AirPlayState.WAITING   -> {
-                        _airPlayState.value = ProtocolState.ADVERTISING
-                        _activeConnection.value = null
-                    }
-                    AirPlayState.STREAMING -> {
-                        _airPlayState.value = ProtocolState.CONNECTED
-                        _activeConnection.value = ActiveConnection("AirPlay Sender", Protocol.AIRPLAY)
-                    }
+                    ProtocolState.CONNECTED   -> _activeConnection.value =
+                        ActiveConnection("AirPlay Sender", Protocol.AIRPLAY)
+                    ProtocolState.ADVERTISING,
+                    ProtocolState.DISABLED,
+                    ProtocolState.ERROR       -> _activeConnection.value = null
                 }
             }
         ).also { it.start() }
-        Logger.d("AirPlay receiver started")
+        Logger.d("AirPlay receiver started (displayName='${settings.effectiveDisplayName}')")
     }
 
     private fun startMiracast() {

@@ -8,8 +8,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 
 /**
  * AirPlayReceiver — Top-level orchestrator for the AirPlay 2 receiver pipeline.
@@ -55,8 +58,12 @@ class AirPlayReceiver(
     // Child components
     private var mdnsService: MdnsService? = null
     private var rtspHandler: RtspHandler? = null
+    private var timingHandler: TimingHandler? = null
     private var videoDecoder: VideoDecoder? = null
     private var audioPlayer: AudioPlayer? = null
+
+    // UDP socket for receiving audio RTP packets — opened after RECORD, closed on TEARDOWN
+    private var audioSocket: DatagramSocket? = null
 
     /**
      * Starts the AirPlay receiver.
@@ -71,6 +78,7 @@ class AirPlayReceiver(
         Logger.i("AirPlayReceiver starting (displayName='$displayName')")
         scope.launch {
             try {
+                startTimingHandler()
                 startMdnsService()
                 startRtspHandler()
             } catch (e: Exception) {
@@ -92,6 +100,7 @@ class AirPlayReceiver(
         Logger.i("AirPlayReceiver stopping")
         try {
             rtspHandler?.stop()
+            timingHandler?.stop()
             mdnsService?.stop()
             releaseMediaComponents()
         } catch (e: Exception) {
@@ -102,6 +111,11 @@ class AirPlayReceiver(
     }
 
     // ─── Private: startup ────────────────────────────────────────────────────
+
+    private fun startTimingHandler() {
+        timingHandler = TimingHandler().also { it.start(scope) }
+        Logger.d("Timing handler started on UDP port ${TimingHandler.TIMING_PORT}")
+    }
 
     private fun startMdnsService() {
         mdnsService = MdnsService(context, onStateChange = { state ->
@@ -215,11 +229,51 @@ class AirPlayReceiver(
         }
         Logger.i("AudioPlayer started (${session.sampleRate}Hz × ${session.channels}ch, " +
                  "codec=${session.audioCodec}, encrypted=${session.isAudioEncrypted})")
+
+        startAudioUdpReceiver()
     }
 
-    /** Clears the video NAL callback and releases both media components. */
+    /**
+     * Opens a UDP socket on [AUDIO_RTP_PORT] and feeds every received packet to
+     * [AudioPlayer.playAudioPacket].
+     *
+     * WHY UDP: AirPlay audio is sent as RTP over UDP — low latency is more important
+     * than guaranteed delivery. A missing packet produces a brief audio glitch,
+     * which is far less disruptive than the buffering delays that TCP would introduce.
+     *
+     * The socket is closed in [releaseMediaComponents] when streaming ends.
+     */
+    private fun startAudioUdpReceiver() {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val socket = DatagramSocket(AUDIO_RTP_PORT)
+                audioSocket = socket
+                Logger.i("Audio UDP receiver listening on port $AUDIO_RTP_PORT")
+
+                val buf    = ByteArray(MAX_AUDIO_PACKET_BYTES)
+                val packet = DatagramPacket(buf, buf.size)
+
+                while (isActive) {
+                    socket.receive(packet)
+                    // copyOf trims to actual packet length before passing to the player
+                    audioPlayer?.playAudioPacket(packet.data.copyOf(packet.length))
+                }
+            } catch (e: Exception) {
+                // SocketException thrown when audioSocket.close() is called — expected
+                if (audioSocket != null) {
+                    Logger.e("Audio UDP receiver error (unexpected)", e)
+                } else {
+                    Logger.d("Audio socket closed (expected during shutdown)")
+                }
+            }
+        }
+    }
+
+    /** Clears the video NAL callback, closes the audio socket, and releases media components. */
     private fun releaseMediaComponents() {
         rtspHandler?.onVideoNalUnit = null
+        try { audioSocket?.close() } catch (e: Exception) { /* non-fatal */ }
+        audioSocket = null
         videoDecoder?.release()
         videoDecoder = null
         audioPlayer?.release()
@@ -242,5 +296,18 @@ class AirPlayReceiver(
         // Real resolution is encoded in the H.264 SPS NAL unit.
         private const val DEFAULT_VIDEO_WIDTH  = 1920
         private const val DEFAULT_VIDEO_HEIGHT = 1080
+
+        /**
+         * UDP port for receiving audio RTP packets.
+         * Advertised in the RTSP SETUP response so the sender knows where to send audio.
+         * Must not conflict with the RTSP port (7000) or timing port ([TimingHandler.TIMING_PORT]).
+         */
+        internal const val AUDIO_RTP_PORT = 6001
+
+        /**
+         * Maximum UDP audio packet size in bytes.
+         * ALAC frames are typically ≤ 8 KB. 16 KB is a safe upper bound.
+         */
+        private const val MAX_AUDIO_PACKET_BYTES = 16 * 1024
     }
 }

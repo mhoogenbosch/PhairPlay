@@ -381,9 +381,11 @@ class RtspHandler(
             // Video: interleaved over the existing RTSP TCP connection
             "RTP/AVP/TCP;unicast;interleaved=0-1"
         } else {
-            // Audio: UDP to a fixed port we allocate
-            "RTP/AVP/UDP;unicast;client_port=$AUDIO_RTP_PORT-${AUDIO_RTP_PORT + 1};" +
-            "server_port=$AUDIO_RTP_PORT-${AUDIO_RTP_PORT + 1}"
+            // Audio: UDP to the fixed port; timing-port tells the sender where to send NTP probes
+            "RTP/AVP/UDP;unicast;" +
+            "client_port=$AUDIO_RTP_PORT-${AUDIO_RTP_PORT + 1};" +
+            "server_port=$AUDIO_RTP_PORT-${AUDIO_RTP_PORT + 1};" +
+            "timing-port=${TimingHandler.TIMING_PORT}"
         }
 
         Logger.d("SETUP #$setupCount — transport: $transport")
@@ -521,10 +523,10 @@ class RtspHandler(
 
         /**
          * UDP port for receiving audio RTP packets.
-         * We use a fixed port for simplicity (one session at a time).
-         * Must not conflict with the RTSP port (7000).
+         * Defined in [AirPlayReceiver] and referenced here so the SETUP response
+         * advertises the same port that [AirPlayReceiver] is listening on.
          */
-        private const val AUDIO_RTP_PORT = 6001
+        private val AUDIO_RTP_PORT = AirPlayReceiver.AUDIO_RTP_PORT
     }
 }
 
