@@ -36,9 +36,12 @@ class VideoDecoder(outputSurface: Any?) {
                 reader.readBits(8)   // level_idc
                 reader.readUe()      // seq_parameter_set_id
 
+                // Default for Baseline/Main profiles per H.264 spec.
+                var chromaFormatIdc = 1
+
                 val highProfiles = setOf(100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135)
                 if (profileIdc in highProfiles) {
-                    val chromaFormatIdc = reader.readUe()
+                    chromaFormatIdc = reader.readUe()
                     if (chromaFormatIdc == 3) reader.readBits(1)
                     reader.readUe()
                     reader.readUe()
@@ -68,9 +71,42 @@ class VideoDecoder(outputSurface: Any?) {
 
                 val picWidthInMbsMinus1 = reader.readUe()
                 val picHeightInMapUnitsMinus1 = reader.readUe()
+                val frameMbsOnlyFlag = reader.readBits(1)
+                if (frameMbsOnlyFlag == 0) {
+                    reader.readBits(1)
+                }
+                reader.readBits(1)
 
-                val width = (picWidthInMbsMinus1 + 1) * 16
-                val height = (picHeightInMapUnitsMinus1 + 1) * 16
+                var cropLeft = 0
+                var cropRight = 0
+                var cropTop = 0
+                var cropBottom = 0
+                if (reader.readBits(1) == 1) {
+                    cropLeft = reader.readUe()
+                    cropRight = reader.readUe()
+                    cropTop = reader.readUe()
+                    cropBottom = reader.readUe()
+                }
+
+                val codedWidth = (picWidthInMbsMinus1 + 1) * 16
+                val codedHeight = (picHeightInMapUnitsMinus1 + 1) * 16 * (2 - frameMbsOnlyFlag)
+
+                val subWidthC = when (chromaFormatIdc) {
+                    0 -> 1
+                    1, 2 -> 2
+                    else -> 1
+                }
+                val subHeightC = when (chromaFormatIdc) {
+                    1 -> 2
+                    else -> 1
+                }
+
+                val cropUnitX = if (chromaFormatIdc == 0) 1 else subWidthC
+                val cropUnitY = if (chromaFormatIdc == 0) (2 - frameMbsOnlyFlag) else subHeightC * (2 - frameMbsOnlyFlag)
+
+                val width = codedWidth - (cropLeft + cropRight) * cropUnitX
+                val height = codedHeight - (cropTop + cropBottom) * cropUnitY
+                if (width <= 0 || height <= 0) return null
 
                 Logger.d("SPS parsed: ${width}x${height} (profile=$profileIdc)")
                 return Pair(width, height)

@@ -169,6 +169,9 @@ class VideoDecoderSpsTest {
 
         w.writeUe(widthInMbs)       // pic_width_in_mbs_minus1
         w.writeUe(heightInMapUnits) // pic_height_in_map_units_minus1
+        w.writeBit(1)               // frame_mbs_only_flag
+        w.writeBit(1)               // direct_8x8_inference_flag
+        w.writeBit(0)               // frame_cropping_flag
 
         return w.toByteArray()
     }
