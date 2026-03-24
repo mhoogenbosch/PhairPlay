@@ -50,10 +50,12 @@ jobs:
           ./gradlew assembleGoogletvDebug --stacktrace 2>&1 | tee app/build/reports/build-error.txt
           BUILD_EXIT=${PIPESTATUS[0]}
           if [ $BUILD_EXIT -ne 0 ]; then
-            echo "=== BUILD FAILED — last 200 lines ==="
-            tail -200 app/build/reports/build-error.txt
-            # Emit last 30 lines as a GitHub annotation (visible via public check-run annotations API)
-            ERROR_MSG=$(tail -30 app/build/reports/build-error.txt | tr '\n' '|' | sed 's/|$//;s/|/%0A/g')
+            echo "=== BUILD FAILED ==="
+            # Show key error lines: FAILURE summary, Caused by, and error: lines
+            FAILURES=$(grep -n "FAILURE:\|Caused by:\|error:\|> Task\|Exception\|could not\|Could not\|unresolved reference\|Unresolved reference" app/build/reports/build-error.txt | tail -60)
+            echo "$FAILURES"
+            # Emit as annotation (visible via public check-run annotations API)
+            ERROR_MSG=$(echo "$FAILURES" | tr '\n' '|' | sed 's/|$//;s/|/%0A/g')
             echo "::error title=assembleGoogletvDebug failed::${ERROR_MSG}"
           fi
           exit $BUILD_EXIT
