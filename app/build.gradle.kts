@@ -13,12 +13,12 @@ plugins {
 
 android {
     namespace = "com.phairplay"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         // applicationId is overridden per flavor below
         minSdk = 25           // Lowest common denominator (Fire TV)
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
 
