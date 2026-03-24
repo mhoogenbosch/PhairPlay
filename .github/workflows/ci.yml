@@ -79,7 +79,16 @@ jobs:
       # Step 8: Run unit tests for both flavors
       # Unit tests run on the build machine (no Android device needed)
       - name: Run unit tests
-        run: ./gradlew test
+        run: |
+          ./gradlew test --stacktrace 2>&1 | tee app/build/reports/test-error.txt
+          TEST_EXIT=${PIPESTATUS[0]}
+          if [ $TEST_EXIT -ne 0 ]; then
+            ERROR=$(grep -n "error:\|Error:\|FAILURE:\|Exception\|Caused by:\|Could not\|failed\|FAILED\|unresolved\|Unresolved" app/build/reports/test-error.txt | grep -v "^[[:space:]]*at " | head -50)
+            if [ -z "$ERROR" ]; then ERROR=$(tail -50 app/build/reports/test-error.txt); fi
+            ERROR_MSG=$(echo "$ERROR" | tr '\n' '|' | sed 's/|$//;s/|/%0A/g')
+            echo "::error title=Unit tests failed::${ERROR_MSG}"
+          fi
+          exit $TEST_EXIT
 
       # Step 9: Upload build reports as artifacts (includes error output and test results)
       - name: Upload build reports
