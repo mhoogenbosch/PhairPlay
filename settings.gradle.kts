@@ -35,10 +35,11 @@ fun resolveSdkDir(): String? {
     return envSdkDir
 }
 
+include(":test-runner")
+project(":test-runner").projectDir = file("test-runner")
+
 if (resolveSdkDir() != null) {
     include(":app")
 } else {
-    logger.lifecycle("Android SDK was not found. Including ':test-runner' fallback project for JVM-only checks.")
-    include(":test-runner")
-    project(":test-runner").projectDir = file("test-runner")
+    logger.lifecycle("Android SDK was not found. ':app' is skipped; ':test-runner' remains available for JVM-only checks.")
 }

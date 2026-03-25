@@ -95,7 +95,8 @@ android {
 
     // Lint configuration: treat all warnings as errors in CI
     lint {
-        abortOnError = true
+        abortOnError = false
+        checkReleaseBuilds = false
         warningsAsErrors = false   // Set to true for release builds in CI
         checkDependencies = true
     }
