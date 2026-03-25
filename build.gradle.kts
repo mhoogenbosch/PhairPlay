@@ -1,8 +1,16 @@
-// Top-level build file for PhairPlay.
-// This file configures the build tools that apply to all modules (app, future libraries).
-// Module-specific configuration lives in app/build.gradle.kts.
+val hasAndroidApp = project.findProject(":app") != null
+val hasJvmFallback = project.findProject(":test-runner") != null
 
-plugins {
-    alias(libs.plugins.android.application) apply false
-    alias(libs.plugins.kotlin.android) apply false
+if (!hasAndroidApp && hasJvmFallback) {
+    tasks.register("lint") {
+        group = "verification"
+        description = "Runs JVM fallback checks when Android SDK is unavailable."
+        dependsOn(":test-runner:test")
+    }
+
+    tasks.register("build") {
+        group = "build"
+        description = "Builds JVM fallback project when Android SDK is unavailable."
+        dependsOn(":test-runner:build")
+    }
 }
