@@ -20,7 +20,7 @@ PhairPlay is a free, open-source, ad-free AirPlay 2 receiver for Android TV and 
 
 PhairPlay currently builds installable debug APKs for Google TV and Fire TV and is ready for real-device testing. The implemented receiver stack includes the Android TV UI, foreground service control, AirPlay mDNS advertising, RTSP handshake handling, H.264/AAC/ALAC pipeline pieces, AirPlay `/photo` JPEG/PNG handling, and Miracast Wi-Fi Direct/WFD advertising.
 
-Not everything in the full product spec is proven end-to-end yet. AirPlay, Miracast, and Cast must still be validated with real sender devices. Google Cast also requires a registered Cast application ID before full receiver testing.
+Not everything in the full product spec is proven end-to-end yet. AirPlay, Miracast, and Cast must still be validated with real sender devices. Google Cast also requires a registered Cast application ID before full receiver testing; see [docs/guides/CAST_APP_ID.md](docs/guides/CAST_APP_ID.md).
 
 ## Implemented / In Progress Features
 
@@ -82,6 +82,9 @@ Not everything in the full product spec is proven end-to-end yet. AirPlay, Mirac
    ```bash
    # For Google TV:
    ./gradlew assembleGoogletvDebug
+
+   # Google TV with a registered Cast App ID:
+   ./gradlew assembleGoogletvDebug -Pphairplay.castAppId=<APP_ID>
 
    # For Fire TV:
    ./gradlew assembleFiretvDebug

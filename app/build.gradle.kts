@@ -11,6 +11,14 @@ plugins {
     alias(libs.plugins.kotlin.android)
 }
 
+fun String.escapedForBuildConfig(): String =
+    replace("\\", "\\\\").replace("\"", "\\\"")
+
+val castAppId: String =
+    (providers.gradleProperty("phairplay.castAppId").orNull
+        ?: providers.environmentVariable("PHAIRPLAY_CAST_APP_ID").orNull
+        ?: "").trim()
+
 android {
     namespace = "com.phairplay"
     compileSdk = 35
@@ -23,6 +31,7 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "CAST_APP_ID", "\"${castAppId.escapedForBuildConfig()}\"")
     }
 
     // Two flavors: one for Google TV, one for Amazon Fire TV.

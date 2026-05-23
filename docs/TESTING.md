@@ -105,12 +105,22 @@ adb logcat -c
 Install the correct debug APK:
 
 ```bash
+# Google TV with AirPlay/Miracast only
+./gradlew assembleGoogletvDebug
+
+# Google TV with Cast enabled for real testing
+./gradlew assembleGoogletvDebug -Pphairplay.castAppId=<APP_ID>
+
 # Google TV
 adb install -r app/build/outputs/apk/googletv/debug/app-googletv-debug.apk
 
 # Fire TV
 adb install -r app/build/outputs/apk/firetv/debug/app-firetv-debug.apk
 ```
+
+To get the Cast App ID, register the receiver in the Google Cast SDK Developer
+Console and associate the Android TV package `com.phairplay.googletv`. See
+[Google Cast App ID](guides/CAST_APP_ID.md).
 
 After a failed run, collect diagnostics before restarting the app:
 

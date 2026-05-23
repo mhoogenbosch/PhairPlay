@@ -1,6 +1,7 @@
 package com.phairplay.cast
 
 import android.content.Context
+import com.phairplay.BuildConfig
 import com.phairplay.service.ProtocolState
 import com.phairplay.util.Logger
 
@@ -12,15 +13,15 @@ import com.phairplay.util.Logger
  * (macOS only) and Miracast (Windows/Android without setup) for a universal receiver.
  *
  * HOW: Implementation proceeds in phases:
- * - Phase 1 (this stub): Architecture defined, availability check, graceful fallback
- * - Phase 2 (M7): Full Cast SDK integration
+ * - Phase 1 (this stub): Architecture defined, configuration checks, graceful fallback
+ * - Phase 2 (M7): Full Cast Connect SDK integration
  *
  * IMPORTANT PRE-CONDITIONS for Cast support:
  * 1. Register PhairPlay as a Cast application at:
  *    https://cast.google.com/publish → "ADD NEW APPLICATION" → "Custom Receiver"
  * 2. Note the Application ID assigned by Google
- * 3. Add the App ID to `res/values/cast_options.xml` (see below)
- * 4. Add `play-services-cast-framework` dependency to build.gradle.kts
+ * 3. Build with `-Pphairplay.castAppId=<APP_ID>` or `PHAIRPLAY_CAST_APP_ID=<APP_ID>`
+ * 4. Add Cast Connect SDK dependencies and receiver metadata when full Cast is enabled
  *
  * FIRE TV LIMITATION:
  * Amazon Fire TV does NOT include Google Play Services, which is required by the
@@ -28,8 +29,8 @@ import com.phairplay.util.Logger
  * check handles this gracefully.
  *
  * Cast protocol stack (simplified):
- *   mDNS advertisement (Cast app ID) → TLS connection (port 8009) →
- *   Cast protocol (CASTV2) → Media receiver session → Content display
+ *   Cast app ID association → sender launch request → Cast Connect session →
+ *   media/session messages → content display
  *
  * Example (future usage):
  *   val receiver = CastReceiver(context) { state -> updateUI(state) }
@@ -51,6 +52,12 @@ class CastReceiver(
      * TODO Phase 7: Initialize CastReceiverContext from Cast SDK.
      */
     fun start() {
+        if (!isConfigured()) {
+            Logger.w("Google Cast is not configured: missing Cast application ID")
+            onStateChanged(ProtocolState.ERROR)
+            return
+        }
+
         if (!isAvailable(context)) {
             Logger.w("Google Cast not available on this device (missing Google Play Services)")
             onStateChanged(ProtocolState.DISABLED)
@@ -58,8 +65,8 @@ class CastReceiver(
         }
 
         Logger.i("CastReceiver starting")
-        // TODO Phase 7: CastReceiverContext.getInstance().start()
-        // TODO Phase 7: Register CastReceiverContext.SessionManagerListener
+        // TODO Phase 7: Initialize CastReceiverContext with CAST_APP_ID.
+        // TODO Phase 7: Register CastReceiverContext.SessionManagerListener.
         onStateChanged(ProtocolState.ADVERTISING)
     }
 
@@ -102,14 +109,29 @@ class CastReceiver(
         }
 
         /**
+         * Returns true when this build contains a registered Cast Application ID.
+         *
+         * The ID is intentionally supplied at build time so local debug builds can
+         * remain open-source and shareable without pretending Cast is testable
+         * before console registration is complete.
+         */
+        fun isConfigured(appId: String = CAST_APP_ID): Boolean {
+            val normalized = appId.trim()
+            return normalized.isNotEmpty() &&
+                normalized != "TODO_REGISTER_YOUR_CAST_APP_ID" &&
+                normalized != "00000000"
+        }
+
+        /**
          * The Cast Application ID registered on the Google Cast Developer Console.
          *
-         * TODO Phase 7: Replace this placeholder with the real registered App ID.
-         * Register at: https://cast.google.com/publish
+         * Register at: https://cast.google.com/publish and build with either:
+         * `./gradlew assembleGoogletvDebug -Pphairplay.castAppId=<APP_ID>` or
+         * `PHAIRPLAY_CAST_APP_ID=<APP_ID> ./gradlew assembleGoogletvDebug`.
          *
          * The App ID tells senders (Chrome, Android) which Cast receiver app to use.
          * Without a valid App ID, Cast connections will be rejected.
          */
-        const val CAST_APP_ID = "TODO_REGISTER_YOUR_CAST_APP_ID"
+        const val CAST_APP_ID = BuildConfig.CAST_APP_ID
     }
 }

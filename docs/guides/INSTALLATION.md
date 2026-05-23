@@ -74,11 +74,17 @@ cd PhairPlay
 # Build for Google TV
 ./gradlew assembleGoogletvRelease
 
+# Build for Google TV with a registered Cast App ID
+./gradlew assembleGoogletvRelease -Pphairplay.castAppId=<APP_ID>
+
 # Build for Fire TV
 ./gradlew assembleFiretvRelease
 ```
 
 APKs are in `app/build/outputs/apk/`.
+
+Google Cast requires a registered Cast App ID for real testing. See
+[Google Cast App ID](CAST_APP_ID.md) before testing Cast on Google TV.
 
 ---
 
