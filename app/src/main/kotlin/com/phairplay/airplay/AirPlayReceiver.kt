@@ -182,7 +182,9 @@ class AirPlayReceiver(
                 startMirrorKeys(aesKey, ecdhSecret, aesIv, remoteAddr, senderTimingPort)
             },
             onMirrorStreamStart = { streamConnectionId -> startMirrorStream(streamConnectionId) },
-            onMirrorAudioStart = { sampleRate, channels -> startMirrorAudio(sampleRate, channels) }
+            onMirrorAudioStart = { sampleRate, channels -> startMirrorAudio(sampleRate, channels) },
+            onMirrorAudioStop = { stopMirrorAudio() },
+            onMirrorVideoStop = { stopMirrorVideo() }
         ).also { it.start(scope) }
         Logger.d("RTSP handler started on port 7000")
     }
@@ -393,6 +395,20 @@ class AirPlayReceiver(
         return server.dataPort to server.controlPort
     }
 
+    /** Stops ONLY the mirror audio stream (macOS dynamic-stream TEARDOWN) — video keeps running. */
+    private fun stopMirrorAudio() {
+        audioServer?.stop()
+        audioServer = null
+        Logger.i("Mirror audio stream stopped (video mirroring continues)")
+    }
+
+    /** Stops ONLY the mirror video stream (macOS dynamic-stream TEARDOWN) — audio keeps playing. */
+    private fun stopMirrorVideo() {
+        mirrorServer?.stop()
+        mirrorServer = null
+        Logger.i("Mirror video stream stopped (audio playback continues)")
+    }
+
     /** Clears the video NAL callback, closes the audio socket, and releases media components. */
     private fun releaseMediaComponents() {
         rtspHandler?.onVideoNalUnit = null
@@ -406,9 +422,12 @@ class AirPlayReceiver(
         ntpClient = null
         try { eventSocket?.close() } catch (e: Exception) { /* non-fatal */ }
         eventSocket = null
-        mirrorAesKey = null
-        mirrorEcdhSecret = null
-        mirrorAesIv = null
+        // IMPORTANT: do NOT clear the FairPlay/ECDH keys here. macOS keeps the AirPlay connection
+        // alive after a mirror stops (periodic /feedback) and, because supportsDynamicStreamID=true,
+        // it later re-adds the audio stream on the SAME connection via a standalone SETUP that does
+        // NOT re-send the keys. If we've cleared them, that SETUP yields dataPort=0 and macOS tears
+        // the session down. The keys are refreshed whenever a real keys-SETUP arrives (setMirrorKeys),
+        // so retaining them is safe; they're only stale until the next genuine re-pair overwrites them.
         videoDecoder?.release()
         videoDecoder = null
         audioPlayer?.release()

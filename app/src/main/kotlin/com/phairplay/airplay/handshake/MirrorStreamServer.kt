@@ -1,6 +1,7 @@
 package com.phairplay.airplay.handshake
 
 import android.view.Surface
+import com.phairplay.airplay.StreamStats
 import com.phairplay.airplay.VideoDecoder
 import com.phairplay.util.Logger
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +52,9 @@ class MirrorStreamServer(
     private var lastSps: ByteArray? = null
     private var lastPps: ByteArray? = null
     private var framePtsUs = 0L
+    private var framesIn = 0
+    private var framesDropped = 0
+    private var lastStatMs = 0L
 
     /** The OS-assigned TCP port macOS should connect to (returned in the SETUP response). */
     val dataPort: Int get() = serverSocket.localPort
@@ -108,9 +112,20 @@ class MirrorStreamServer(
 
     /** Bounded enqueue — if the decoder is behind, drop the oldest item to keep latency bounded. */
     private fun enqueue(item: Item) {
+        framesIn++
         if (!queue.offer(item)) {
             queue.poll()
             queue.offer(item)
+            framesDropped++
+        }
+        StreamStats.videoQueue = queue.size
+        if (framesIn % 300 == 0) {
+            val now = System.currentTimeMillis()
+            if (lastStatMs != 0L) StreamStats.videoFps = (300_000L / (now - lastStatMs).coerceAtLeast(1)).toInt()
+            lastStatMs = now
+            StreamStats.videoDropPct = framesDropped * 100 / framesIn
+            Logger.i("Video stats: in=$framesIn dropped=$framesDropped " +
+                "(${StreamStats.videoDropPct}%) queue=${queue.size}/$QUEUE_CAPACITY ${StreamStats.videoFps}fps")
         }
     }
 
@@ -154,6 +169,7 @@ class MirrorStreamServer(
         lastPps = pps
         val sc = MirrorCrypto.START_CODE
         decoder = VideoDecoder(surface).also { it.initialize(sc + sps, sc + pps, width, height) }
+        StreamStats.videoRes = "${width}x${height}"
         Logger.i("Mirror decoder (re)initialized (sps=${sps.size}B pps=${pps.size}B)")
     }
 

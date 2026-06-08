@@ -198,7 +198,10 @@ class VideoDecoder(private val outputSurface: Surface) {
         var outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
 
         while (outputBufferIndex >= 0) {
-            // render=true: display this decoded frame on the Surface
+            // Render immediately. We deliberately do NOT schedule a future render time for A/V sync:
+            // this Surface's BufferQueue holds only ~3 frames, so any hold quickly back-pressures the
+            // decoder → the upstream frame queue saturates → big latency + dropped (corrupt) frames.
+            // A/V alignment is handled by keeping the AUDIO path low-latency instead (AudioStreamServer).
             codec.releaseOutputBuffer(outputBufferIndex, true)
             outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
         }

@@ -113,7 +113,7 @@ class SettingsRepository(private val context: Context) {
         startOnBoot        = this[Keys.START_ON_BOOT]           ?: false,
         showDebugOverlay   = this[Keys.SHOW_DEBUG_OVERLAY]      ?: false,
         forceHighResolution = this[Keys.FORCE_HIGH_RESOLUTION]  ?: false,
-        mirrorAudioEnabled = this[Keys.MIRROR_AUDIO_ENABLED]    ?: false
+        mirrorAudioEnabled = this[Keys.MIRROR_AUDIO_ENABLED]    ?: true
     )
 
     /**

@@ -42,7 +42,11 @@ open class RtspHandler(
     /** AirPlay 2 mirror SETUP: start the video data server (type 110); returns its data port. */
     private val onMirrorStreamStart: (streamConnectionId: Long) -> Int = { 0 },
     /** AirPlay 2 mirror SETUP: start the audio server (type 96, AAC-ELD); returns (dataPort, controlPort). */
-    private val onMirrorAudioStart: (sampleRate: Int, channels: Int) -> Pair<Int, Int> = { _, _ -> 0 to 0 }
+    private val onMirrorAudioStart: (sampleRate: Int, channels: Int) -> Pair<Int, Int> = { _, _ -> 0 to 0 },
+    /** AirPlay 2 mirror TEARDOWN of just the audio stream (type 96) — stop audio, keep video. */
+    private val onMirrorAudioStop: () -> Unit = {},
+    /** AirPlay 2 mirror TEARDOWN of just the video stream (type 110) — stop video, keep audio. */
+    private val onMirrorVideoStop: () -> Unit = {}
 ) {
 
     private var serverSocket: ServerSocket? = null
@@ -223,9 +227,28 @@ open class RtspHandler(
         "/pair-setup"  -> handlePairSetup(request)
         "/pair-verify" -> handlePairVerify(request)
         "/fp-setup"    -> handleFpSetup(request)
-        "/feedback"    -> RtspResponse(200, "OK", protocol = request.responseProtocol())
+        "/feedback"    -> handleFeedback(request)
         "/audioMode"   -> RtspResponse(200, "OK", protocol = request.responseProtocol())
         else           -> handleUnknownInternal(request)
+    }
+
+    /**
+     * POST /feedback — macOS health-checks the session every ~2 s. We log the body (DIAGNOSTIC:
+     * to learn whether macOS expects per-stream status here when audio is active) and reply 200 OK.
+     */
+    private fun handleFeedback(request: RtspRequest): RtspResponse {
+        val n = request.bodyBytes.size
+        if (n > 0) {
+            runCatching {
+                val p = PlistCodec.decode(request.bodyBytes)
+                Logger.i("/feedback body ($n B): " + p.entries.joinToString { (k, v) ->
+                    "$k=" + when (v) { is ByteArray -> "${v.size}B"; is List<*> -> "list[${v.size}]"; else -> v.toString() }
+                })
+            }.onFailure { Logger.i("/feedback body ($n B, non-plist)") }
+        } else {
+            Logger.d("/feedback (empty)")
+        }
+        return RtspResponse(200, "OK", protocol = request.responseProtocol())
     }
 
     /** GET /info — advertises receiver identity + capabilities (binary plist). */
@@ -315,6 +338,11 @@ open class RtspHandler(
                         mapOf("type" to 110L, "dataPort" to dataPort.toLong())
                     }
                     96 -> {
+                        // DIAGNOSTIC: dump every field macOS sends for the realtime-audio stream —
+                        // codec type (ct), samples-per-frame (spf), latencies, encryption (et), etc.
+                        Logger.i("mirror stream type=96 dict: " + stream.entries.joinToString { (k, v) ->
+                            "$k=" + when (v) { is ByteArray -> "${v.size}B"; is List<*> -> "list[${v.size}]"; else -> v.toString() }
+                        })
                         if (!audioEnabled) {
                             Logger.i("mirror stream type=96 ignored (audio disabled in settings)")
                             return@mapNotNull null
@@ -427,12 +455,38 @@ open class RtspHandler(
         return RtspResponse(statusCode = 200, statusMessage = "OK")
     }
 
-    /** Handles TEARDOWN — macOS says stop and clean up. */
+    /**
+     * Handles TEARDOWN. A TEARDOWN may target SPECIFIC streams (AirPlay 2 dynamic stream removal —
+     * e.g. macOS drops the audio stream when playback stops) or the whole session. If the body lists
+     * streams and they're audio-only, we stop just the audio and KEEP the mirror running; otherwise
+     * we tear the whole session down. (Previously any TEARDOWN killed the mirror, so stopping audio
+     * on the Mac ended screen mirroring entirely.)
+     */
     open fun handleTeardownInternal(request: RtspRequest): RtspResponse {
-        Logger.i("TEARDOWN received — streaming stopping")
+        val streamTypes = parseTeardownStreamTypes(request.bodyBytes)
+        if (streamTypes != null && streamTypes.isNotEmpty()) {
+            // Stream-level teardown: stop ONLY the listed streams and keep the session (keys, NTP,
+            // event channel) alive so either stream can be re-added later. This makes audio and
+            // video independently stoppable/resumable — e.g. audio keeps playing with video gone,
+            // or video keeps mirroring with audio stopped. A genuine session end arrives either as
+            // an empty-body TEARDOWN (below) or the control connection closing (handleClient finally
+            // → onStreamingStopped), so we never strand the UI.
+            Logger.i("TEARDOWN streams=$streamTypes — stopping those, session continues")
+            if (streamTypes.contains(96)) onMirrorAudioStop()
+            if (streamTypes.contains(110)) onMirrorVideoStop()
+            return RtspResponse(statusCode = 200, statusMessage = "OK", protocol = request.responseProtocol())
+        }
+        Logger.i("TEARDOWN (session, body=${request.bodyBytes.size}B) — streaming stopping")
         onStreamingStopped()
-        return RtspResponse(statusCode = 200, statusMessage = "OK")
+        return RtspResponse(statusCode = 200, statusMessage = "OK", protocol = request.responseProtocol())
     }
+
+    /** Parses the `streams` list from a TEARDOWN body, returning the stream `type`s, or null. */
+    private fun parseTeardownStreamTypes(body: ByteArray): List<Int>? = runCatching {
+        if (body.isEmpty()) return null
+        val streams = PlistCodec.decode(body)["streams"] as? List<*> ?: return null
+        streams.mapNotNull { ((it as? Map<*, *>)?.get("type") as? Long)?.toInt() }
+    }.getOrNull()
 
     private fun handleGetParameter(request: RtspRequest): RtspResponse {
         val query = request.body.trim()

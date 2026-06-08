@@ -89,7 +89,7 @@ data class AppSettings(
      * the whole mirror session down after a couple of seconds — so this defaults OFF to keep video
      * mirroring rock-solid. Turn on to experiment with audio.
      */
-    val mirrorAudioEnabled: Boolean = false  // experimental — macOS tears the realtime-audio session down
+    val mirrorAudioEnabled: Boolean = true
 ) {
 
     /** Advertised mirroring display size: 2560×1440 when [forceHighResolution], else 1920×1080. */

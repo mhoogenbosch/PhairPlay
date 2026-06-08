@@ -199,6 +199,8 @@ class PhairPlayService : Service() {
      * @param settings Current app settings; read once per start/restart cycle.
      */
     private fun startAirPlay(settings: AppSettings) {
+        // Mirror the debug-overlay setting into the shared stats bus that StreamingScreen reads.
+        com.phairplay.airplay.StreamStats.overlayEnabled = settings.showDebugOverlay
         // Captures the sender name reported by AirPlayReceiver before CONNECTED fires.
         // onSenderNameChanged is called synchronously before emitState(CONNECTED), so
         // this assignment happens-before the Main-thread read in onStateChanged.
