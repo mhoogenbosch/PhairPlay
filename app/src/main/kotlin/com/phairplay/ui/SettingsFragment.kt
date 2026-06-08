@@ -52,7 +52,7 @@ class SettingsFragment : Fragment() {
     private lateinit var rowAirPlay: View
     private lateinit var rowMiracast: View
     private lateinit var rowCast: View
-    private lateinit var rowAirPlayPin: View
+    private lateinit var rowMirrorAudio: View
     private lateinit var rowStartOnBoot: View
     private lateinit var rowDebugOverlay: View
     private lateinit var rowForceHighRes: View
@@ -89,7 +89,7 @@ class SettingsFragment : Fragment() {
         rowAirPlay          = view.findViewById(R.id.row_airplay)
         rowMiracast         = view.findViewById(R.id.row_miracast)
         rowCast             = view.findViewById(R.id.row_cast)
-        rowAirPlayPin       = view.findViewById(R.id.row_airplay_pin)
+        rowMirrorAudio      = view.findViewById(R.id.row_mirror_audio)
         rowStartOnBoot      = view.findViewById(R.id.row_start_on_boot)
         rowDebugOverlay     = view.findViewById(R.id.row_debug_overlay)
         rowForceHighRes     = view.findViewById(R.id.row_force_high_res)
@@ -112,7 +112,7 @@ class SettingsFragment : Fragment() {
         configureToggleRow(rowAirPlay,      R.string.setting_airplay_enabled,    R.string.setting_airplay_subtitle)
         configureToggleRow(rowMiracast,     R.string.setting_miracast_enabled,   R.string.setting_miracast_subtitle)
         configureToggleRow(rowCast,         R.string.setting_cast_enabled,       R.string.setting_cast_subtitle)
-        configureToggleRow(rowAirPlayPin,   R.string.setting_airplay_pin,        R.string.setting_airplay_pin_subtitle)
+        configureToggleRow(rowMirrorAudio,  R.string.setting_mirror_audio,       R.string.setting_mirror_audio_subtitle)
         configureToggleRow(rowStartOnBoot,  R.string.setting_start_on_boot,      0)
         configureToggleRow(rowDebugOverlay, R.string.setting_debug_overlay,      R.string.setting_debug_overlay_subtitle)
         configureToggleRow(rowForceHighRes, R.string.setting_force_high_res,      R.string.setting_force_high_res_subtitle)
@@ -160,7 +160,7 @@ class SettingsFragment : Fragment() {
         setToggle(rowAirPlay,      settings.airPlayEnabled)
         setToggle(rowMiracast,     settings.miracastEnabled)
         setToggle(rowCast,         settings.castEnabled)
-        setToggle(rowAirPlayPin,   settings.airPlayPinAuthEnabled)
+        setToggle(rowMirrorAudio,  settings.mirrorAudioEnabled)
         setToggle(rowStartOnBoot,  settings.startOnBoot)
         setToggle(rowDebugOverlay, settings.showDebugOverlay)
         setToggle(rowForceHighRes, settings.forceHighResolution)
@@ -183,7 +183,7 @@ class SettingsFragment : Fragment() {
         setToggleListener(rowAirPlay)      { enabled -> save { it.copy(airPlayEnabled = enabled) } }
         setToggleListener(rowMiracast)     { enabled -> save { it.copy(miracastEnabled = enabled) } }
         setToggleListener(rowCast)         { enabled -> save { it.copy(castEnabled = enabled) } }
-        setToggleListener(rowAirPlayPin)   { enabled -> save { it.copy(airPlayPinAuthEnabled = enabled) } }
+        setToggleListener(rowMirrorAudio)  { enabled -> save { it.copy(mirrorAudioEnabled = enabled) } }
         setToggleListener(rowStartOnBoot)  { enabled -> save { it.copy(startOnBoot = enabled) } }
         setToggleListener(rowDebugOverlay) { enabled -> save { it.copy(showDebugOverlay = enabled) } }
         setToggleListener(rowForceHighRes) { enabled -> save { it.copy(forceHighResolution = enabled) } }

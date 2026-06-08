@@ -110,7 +110,7 @@
             android:layout_marginTop="24dp" />
 
         <include layout="@layout/settings_toggle_row"
-            android:id="@+id/row_airplay_pin"
+            android:id="@+id/row_mirror_audio"
             android:layout_width="match_parent"
             android:layout_height="72dp" />
 

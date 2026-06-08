@@ -1,11 +1,18 @@
 package com.phairplay.ui
 
 import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
+import android.os.Handler
+import android.os.Looper
 import android.util.AttributeSet
+import android.view.Gravity
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.Surface
 import android.widget.FrameLayout
+import android.widget.TextView
+import com.phairplay.airplay.StreamStats
 import com.phairplay.util.Logger
 
 /**
@@ -43,12 +50,40 @@ class StreamingScreen @JvmOverloads constructor(
     // The Surface is created asynchronously by SurfaceView — stored here when ready
     private var surface: Surface? = null
 
+    // Optional debug HUD (Settings → "Debug overlay"), drawn on top of the video.
+    private val debugView = TextView(context).apply {
+        setTextColor(Color.parseColor("#FF00FF66"))
+        setBackgroundColor(Color.parseColor("#A6000000"))
+        textSize = 13f
+        typeface = Typeface.MONOSPACE
+        setPadding(24, 16, 24, 16)
+        visibility = GONE
+    }
+    private val handler = Handler(Looper.getMainLooper())
+    private val debugTick = object : Runnable {
+        override fun run() {
+            if (StreamStats.overlayEnabled) {
+                debugView.visibility = VISIBLE
+                debugView.text = StreamStats.summary()
+            } else if (debugView.visibility != GONE) {
+                debugView.visibility = GONE
+            }
+            handler.postDelayed(this, DEBUG_REFRESH_MS)
+        }
+    }
+
     init {
         // Add the SurfaceView to fill this FrameLayout completely
         addView(surfaceView, LayoutParams(
             LayoutParams.MATCH_PARENT,
             LayoutParams.MATCH_PARENT
         ))
+
+        // Debug HUD overlay, top-left, above the video surface.
+        addView(debugView, LayoutParams(
+            LayoutParams.WRAP_CONTENT,
+            LayoutParams.WRAP_CONTENT
+        ).apply { gravity = Gravity.TOP or Gravity.START; topMargin = 48; leftMargin = 48 })
 
         // Register a callback to track when the Surface is created/destroyed
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
@@ -82,4 +117,18 @@ class StreamingScreen @JvmOverloads constructor(
      * @return The rendering Surface, or null if not yet available.
      */
     fun getSurface(): Surface? = surface
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        handler.post(debugTick)            // start polling the debug HUD
+    }
+
+    override fun onDetachedFromWindow() {
+        handler.removeCallbacks(debugTick)
+        super.onDetachedFromWindow()
+    }
+
+    companion object {
+        private const val DEBUG_REFRESH_MS = 500L
+    }
 }

@@ -82,11 +82,11 @@
     <string name="setting_miracast_subtitle">Accept connections from Windows and Android</string>
     <string name="setting_cast_enabled">Google Cast Receiver</string>
     <string name="setting_cast_subtitle">Accept connections from Chrome and Android</string>
-    <string name="setting_airplay_pin">Require PIN for AirPlay</string>
-    <string name="setting_airplay_pin_subtitle">Show a 4-digit confirmation code on screen</string>
+    <string name="setting_mirror_audio">Mirror audio</string>
+    <string name="setting_mirror_audio_subtitle">Play the Mac\'s sound while mirroring</string>
     <string name="setting_start_on_boot">Start on boot</string>
     <string name="setting_debug_overlay">Debug overlay</string>
-    <string name="setting_debug_overlay_subtitle">Show FPS and latency on streaming screen</string>
+    <string name="setting_debug_overlay_subtitle">Show live FPS, queue and drop stats while streaming</string>
     <string name="setting_force_high_res">Higher resolution (1440p)</string>
     <string name="setting_force_high_res_subtitle">Sharper mirroring; uses more CPU. Off = 1080p</string>
     <string name="setting_version">Version</string>
