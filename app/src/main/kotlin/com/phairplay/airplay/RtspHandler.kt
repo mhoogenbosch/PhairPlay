@@ -78,6 +78,10 @@ open class RtspHandler(
     @Volatile
     private var isMirrorSession = false
 
+    /** Mirror stream types currently active (96 = audio, 110 = video). Drives TEARDOWN routing.
+     *  `protected` so tests can seed it without driving the full FairPlay SETUP handshake. */
+    protected val activeStreamTypes = mutableSetOf<Int>()
+
     private var setupCount = 0
 
     private val requestReader = RtspRequestReader(
@@ -189,6 +193,7 @@ open class RtspHandler(
             pairingSession = null
             fairPlay = null
             isMirrorSession = false
+            activeStreamTypes.clear()
             setupCount = 0
             onStreamingStopped()
         }
@@ -334,6 +339,7 @@ open class RtspHandler(
                     110 -> {
                         val scid = (stream["streamConnectionID"] as? Long) ?: 0L
                         val dataPort = onMirrorStreamStart(scid)
+                        activeStreamTypes.add(110)
                         Logger.i("mirror stream type=110 streamConnectionID=$scid dataPort=$dataPort")
                         mapOf("type" to 110L, "dataPort" to dataPort.toLong())
                     }
@@ -348,8 +354,10 @@ open class RtspHandler(
                             return@mapNotNull null
                         }
                         val sr = (stream["sr"] as? Long)?.toInt() ?: 44100
-                        val (dataPort, controlPort) = onMirrorAudioStart(sr, 2)
-                        Logger.i("mirror stream type=96 (AAC-ELD ${sr}Hz) dataPort=$dataPort controlPort=$controlPort")
+                        val ch = (stream["channels"] as? Long)?.toInt() ?: 2   // mirroring is stereo
+                        val (dataPort, controlPort) = onMirrorAudioStart(sr, ch)
+                        activeStreamTypes.add(96)
+                        Logger.i("mirror stream type=96 (AAC-ELD ${sr}Hz x$ch) dataPort=$dataPort controlPort=$controlPort")
                         mapOf("type" to 96L, "dataPort" to dataPort.toLong(), "controlPort" to controlPort.toLong())
                     }
                     else -> {
@@ -465,18 +473,23 @@ open class RtspHandler(
     open fun handleTeardownInternal(request: RtspRequest): RtspResponse {
         val streamTypes = parseTeardownStreamTypes(request.bodyBytes)
         if (streamTypes != null && streamTypes.isNotEmpty()) {
-            // Stream-level teardown: stop ONLY the listed streams and keep the session (keys, NTP,
-            // event channel) alive so either stream can be re-added later. This makes audio and
-            // video independently stoppable/resumable — e.g. audio keeps playing with video gone,
-            // or video keeps mirroring with audio stopped. A genuine session end arrives either as
-            // an empty-body TEARDOWN (below) or the control connection closing (handleClient finally
-            // → onStreamingStopped), so we never strand the UI.
-            Logger.i("TEARDOWN streams=$streamTypes — stopping those, session continues")
-            if (streamTypes.contains(96)) onMirrorAudioStop()
-            if (streamTypes.contains(110)) onMirrorVideoStop()
-            return RtspResponse(statusCode = 200, statusMessage = "OK", protocol = request.responseProtocol())
+            // Stream-level teardown: stop ONLY the listed streams. Keep the session (keys, NTP,
+            // event channel) alive so the remaining stream keeps running and a stopped one can be
+            // re-added later — e.g. audio keeps playing with video gone, or video keeps mirroring
+            // with audio stopped. But if this removes the LAST active stream (e.g. macOS names both
+            // 96 and 110 to end the session), fall through to a full teardown so cleanup isn't left
+            // to the eventual socket close.
+            if (streamTypes.contains(96)) { onMirrorAudioStop(); activeStreamTypes.remove(96) }
+            if (streamTypes.contains(110)) { onMirrorVideoStop(); activeStreamTypes.remove(110) }
+            if (activeStreamTypes.isNotEmpty()) {
+                Logger.i("TEARDOWN streams=$streamTypes — stopped those, session continues (active=$activeStreamTypes)")
+                return RtspResponse(statusCode = 200, statusMessage = "OK", protocol = request.responseProtocol())
+            }
+            Logger.i("TEARDOWN streams=$streamTypes — last stream removed, ending session")
+        } else {
+            Logger.i("TEARDOWN (session, body=${request.bodyBytes.size}B) — streaming stopping")
         }
-        Logger.i("TEARDOWN (session, body=${request.bodyBytes.size}B) — streaming stopping")
+        activeStreamTypes.clear()
         onStreamingStopped()
         return RtspResponse(statusCode = 200, statusMessage = "OK", protocol = request.responseProtocol())
     }

@@ -102,6 +102,7 @@ class AirPlayReceiver(
     @Volatile private var audioServer: AudioStreamServer? = null
     @Volatile private var ntpClient: AirPlayNtpClient? = null
     @Volatile private var eventSocket: ServerSocket? = null
+    @Volatile private var eventClientSocket: java.net.Socket? = null
     @Volatile private var mirrorAesKey: ByteArray? = null
     @Volatile private var mirrorEcdhSecret: ByteArray? = null
     @Volatile private var mirrorAesIv: ByteArray? = null
@@ -354,13 +355,17 @@ class AirPlayReceiver(
         // the advertised event port to be connectable, so keep it open and readable.
         scope.launch(Dispatchers.IO) {
             try {
-                val s: Socket = event.accept()
-                Logger.i("Event channel: macOS connected from ${s.inetAddress.hostAddress}")
-                val buf = ByteArray(4096)
-                val input = s.getInputStream()
-                while (isActive && input.read(buf) != -1) { /* drain */ }
+                event.accept().use { s ->
+                    eventClientSocket = s
+                    Logger.i("Event channel: macOS connected from ${s.inetAddress.hostAddress}")
+                    val buf = ByteArray(4096)
+                    val input = s.getInputStream()
+                    while (isActive && input.read(buf) != -1) { /* drain */ }
+                }
             } catch (e: Exception) {
                 if (eventSocket != null) Logger.d("Event channel closed")
+            } finally {
+                eventClientSocket = null
             }
         }
         // AirPlay 2 NTP is receiver-initiated: poll the sender's timing port so macOS proceeds.
@@ -420,14 +425,19 @@ class AirPlayReceiver(
         audioServer = null
         ntpClient?.stop()
         ntpClient = null
+        try { eventClientSocket?.close() } catch (e: Exception) { /* non-fatal */ }
+        eventClientSocket = null
         try { eventSocket?.close() } catch (e: Exception) { /* non-fatal */ }
         eventSocket = null
-        // IMPORTANT: do NOT clear the FairPlay/ECDH keys here. macOS keeps the AirPlay connection
-        // alive after a mirror stops (periodic /feedback) and, because supportsDynamicStreamID=true,
-        // it later re-adds the audio stream on the SAME connection via a standalone SETUP that does
-        // NOT re-send the keys. If we've cleared them, that SETUP yields dataPort=0 and macOS tears
-        // the session down. The keys are refreshed whenever a real keys-SETUP arrives (setMirrorKeys),
-        // so retaining them is safe; they're only stale until the next genuine re-pair overwrites them.
+        // Clear the FairPlay/ECDH keys on FULL teardown only. This method runs on a genuine session
+        // end (last-stream / session TEARDOWN, or control-connection close) — NOT on a per-stream
+        // teardown, which goes through stopMirrorAudio/stopMirrorVideo and leaves the keys intact so
+        // macOS can re-add a dynamic stream on the same live session without re-sending keys (that
+        // dynamic-readd path is why the keys must survive a stream stop). Clearing here prevents a
+        // brand-new control connection from reusing a previous session's stale keys.
+        mirrorAesKey = null
+        mirrorEcdhSecret = null
+        mirrorAesIv = null
         videoDecoder?.release()
         videoDecoder = null
         audioPlayer?.release()
