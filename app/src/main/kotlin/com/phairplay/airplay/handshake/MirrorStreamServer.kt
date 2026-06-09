@@ -55,6 +55,9 @@ class MirrorStreamServer(
     private var framesIn = 0
     private var framesDropped = 0
     private var lastStatMs = 0L
+    // Set by the reader thread when a frame is dropped under load; the decoder thread then skips
+    // frames until the next keyframe (IDR) so it never decodes a reference-broken, corrupt stream.
+    @Volatile private var awaitingKeyframe = false
 
     /** The OS-assigned TCP port macOS should connect to (returned in the SETUP response). */
     val dataPort: Int get() = serverSocket.localPort
@@ -117,6 +120,7 @@ class MirrorStreamServer(
             queue.poll()
             queue.offer(item)
             framesDropped++
+            awaitingKeyframe = true        // a frame was lost — resync the decoder at the next IDR
         }
         StreamStats.videoQueue = queue.size
         if (framesIn % 300 == 0) {
@@ -180,9 +184,30 @@ class MirrorStreamServer(
             d.release(); decoder = null; lastSps = null; lastPps = null
             return
         }
+        if (awaitingKeyframe) {
+            // After a dropped frame the stream is reference-broken; skip until the next IDR so we
+            // don't feed the decoder predicted frames with missing references (which smear/blocky).
+            if (!isKeyframe(annexB)) return
+            awaitingKeyframe = false
+            Logger.i("Mirror: resynced on keyframe after a dropped frame")
+        }
         if (framePtsUs == 0L) Logger.i("Mirror: first video frame fed to decoder (${annexB.size}B)")
         d.decodeNalUnit(annexB, framePtsUs)
         framePtsUs += FRAME_INTERVAL_US
+    }
+
+    /** True if the Annex-B frame contains an IDR NAL unit (type 5) — a decodable resync point. */
+    private fun isKeyframe(annexB: ByteArray): Boolean {
+        var i = 0
+        while (i + 3 < annexB.size) {
+            if (annexB[i].toInt() == 0 && annexB[i + 1].toInt() == 0 && annexB[i + 2].toInt() == 1) {
+                if ((annexB[i + 3].toInt() and 0x1F) == 5) return true   // IDR slice
+                i += 3
+            } else {
+                i++
+            }
+        }
+        return false
     }
 
     /** The streaming Surface appears shortly after CONNECTED is emitted; poll briefly. */
