@@ -354,7 +354,9 @@ class AirPlayReceiver(
                 aesKey     = session.aesKey.takeIf { session.isAudioEncrypted },
                 aesIv      = session.aesIv.takeIf  { session.isAudioEncrypted },
                 sampleRate = session.sampleRate,
-                channels   = session.channels
+                channels   = session.channels,
+                codec      = session.audioCodec,
+                alacFramesPerPacket = session.alacFramesPerPacket
             )
         }
         Logger.i("AudioPlayer started (${session.sampleRate}Hz × ${session.channels}ch, " +

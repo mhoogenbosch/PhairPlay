@@ -15,10 +15,10 @@ import java.net.Socket
  * connection: the sender streams ahead and the receiver plays from a buffer, scheduled against an
  * anchor time provided by SETRATEANCHORTIME.
  *
- * STATUS: capture/diagnostic first pass. It accepts the TCP connection (so macOS proceeds and
- * streams) and logs the framing of the first packets so the exact wire format (length prefix, RTP
- * header, audio codec payload, encryption) can be confirmed on the target macOS before the decode +
- * AudioTrack playback path is built. Reference: AudioStreamServer (realtime) + AudioPlayer (ALAC/AAC).
+ * STATUS: accept-only. It accepts the TCP connection (so macOS doesn't abort) and logs the framing
+ * of the first packets. Playback isn't wired: macOS Apple Music never takes this path (it uses legacy
+ * RAOP), and the AirPlay 2 buffered stream is FairPlay-2-encrypted, which no FOSS receiver can
+ * decrypt. Kept for senders that do reach it and for protocol reference (AudioStreamServer/AudioPlayer).
  */
 class BufferedAudioServer {
 
@@ -54,10 +54,9 @@ class BufferedAudioServer {
                 val n = input.read(buf)
                 if (n < 0) break
                 totalBytes += n
-                // Log the structure of the first reads so the framing (length prefix / RTP header /
-                // payload) can be decoded; then stop spamming.
+                // Log the framing of the first few reads (length prefix / RTP header / payload).
                 if (reads < 12) {
-                    Logger.i("Buffered audio read[$reads] ${n}B head=${hex(buf, minOf(28, n))}")
+                    Logger.d("Buffered audio read[$reads] ${n}B head=${hex(buf, minOf(28, n))}")
                     reads++
                 }
             }

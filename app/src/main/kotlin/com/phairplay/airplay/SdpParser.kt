@@ -1,5 +1,6 @@
 package com.phairplay.airplay
 
+import com.phairplay.airplay.handshake.RaopRsa
 import com.phairplay.util.Logger
 import android.util.Base64
 
@@ -66,8 +67,9 @@ object SdpParser {
         var ppsBytes: ByteArray? = null
         var h264ProfileLevelId: String? = null
 
-        // Audio encryption (AES-128-CTR)
+        // Audio encryption: rsaaeskey (legacy RSA) or fpaeskey (FairPlay-wrapped, needs fp-setup decrypt)
         var aesKey: ByteArray? = null
+        var fpAesKey: ByteArray? = null
         var aesIv: ByteArray? = null
 
         // ALAC frame size
@@ -108,6 +110,7 @@ object SdpParser {
                                 if (ch > 0) channels = ch
                             }
                             parseAesKey(attr)?.let { aesKey = it }
+                            parseFpAesKey(attr)?.let { fpAesKey = it }
                             parseAesIv(attr)?.let { aesIv = it }
                         }
                     }
@@ -139,6 +142,7 @@ object SdpParser {
             sampleRate = sampleRate,
             channels = channels,
             aesKey = aesKey,
+            fpAesKey = fpAesKey,
             aesIv = aesIv,
             alacFramesPerPacket = alacFramesPerPacket
         )
@@ -230,23 +234,26 @@ object SdpParser {
     }
 
     /**
-     * Parses the AES key from `rsaaeskey:<base64-encoded-encrypted-key>`.
+     * Parses the audio AES key from `rsaaeskey:<base64>` (legacy AirPlay-1 / iTunes).
      *
-     * The key is AES-128 (16 bytes) encrypted with the receiver's RSA public key
-     * in unauthenticated mode (no actual RSA in v1 — key is sent in plaintext Base64).
+     * The blob is the 16-byte AES-128 stream key RSA-encrypted with the AirPort Express public key
+     * (128 or 256 bytes after Base64 decode). We recover it with the known private key via
+     * [RaopRsa]. An already-16-byte value is passed through unchanged (modern senders use FairPlay's
+     * `fpaeskey` instead, decrypted later via fp-setup).
      */
     private fun parseAesKey(attr: String): ByteArray? {
         if (!attr.startsWith("rsaaeskey:")) return null
-        val b64 = attr.removePrefix("rsaaeskey:")
-        return decodeBase64Safely(b64)?.also {
-            if (it.size != 16) Logger.w("AES key is ${it.size} bytes — expected 16")
+        val blob = decodeBase64Safely(attr.removePrefix("rsaaeskey:")) ?: return null
+        if (blob.size == 16) return blob
+        return RaopRsa.decryptAesKey(blob)?.also {
+            Logger.i("rsaaeskey: RSA-decrypted ${blob.size}B blob → 16B AES key (RSA audio path)")
         }
     }
 
     /**
      * Parses the AES IV from `aesiv:<base64-encoded-iv>`.
      *
-     * The IV is 16 bytes, used as the initial counter for AES-128-CTR mode.
+     * The IV is 16 bytes, re-applied per packet for AES-128-CBC audio decryption.
      */
     private fun parseAesIv(attr: String): ByteArray? {
         if (!attr.startsWith("aesiv:")) return null
@@ -254,6 +261,12 @@ object SdpParser {
         return decodeBase64Safely(b64)?.also {
             if (it.size != 16) Logger.w("AES IV is ${it.size} bytes — expected 16")
         }
+    }
+
+    /** Parses `fpaeskey:<base64>` — the FairPlay-wrapped AES key (Apple Music). Needs fp-setup decrypt. */
+    private fun parseFpAesKey(attr: String): ByteArray? {
+        if (!attr.startsWith("fpaeskey:")) return null
+        return decodeBase64Safely(attr.removePrefix("fpaeskey:"))
     }
 
     /**
@@ -308,6 +321,8 @@ data class SessionDescription(
     val sampleRate: Int = 44100,
     val channels: Int = 2,
     val aesKey: ByteArray? = null,
+    /** FairPlay-wrapped audio key (SDP `fpaeskey`); decrypted to [aesKey] via fp-setup before use. */
+    val fpAesKey: ByteArray? = null,
     val aesIv: ByteArray? = null,
     val alacFramesPerPacket: Int = 352,
     /**

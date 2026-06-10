@@ -230,16 +230,20 @@ open class RtspHandler(
                 val response = routeRequest(request)
                 sendResponse(outputStream, response)
 
-                // Legacy (audio/SDP) path switches to interleaved RTP after RECORD. Mirroring keeps
-                // the RTSP control channel open (the video arrives on a separate data connection).
-                if (request.method == "RECORD" && response.statusCode == 200 && !isMirrorSession) {
-                    Logger.d("RTSP handshake complete — switching to RTP interleaved mode")
+                // After RECORD on a legacy SDP session: a session WITH video switches to interleaved
+                // RTP (video arrives $-framed over this TCP socket). An audio-only session (e.g. Apple
+                // Music) keeps the RTSP control loop — audio arrives on the UDP port, and macOS sends
+                // now-playing metadata / volume / FLUSH / TEARDOWN as RTSP requests here that we must
+                // keep handling (switching to interleaved mode would skip them → no metadata).
+                if (request.method == "RECORD" && response.statusCode == 200 && !isMirrorSession &&
+                    currentSession?.hasVideo == true) {
+                    Logger.d("RTSP handshake complete — switching to interleaved RTP (video)")
                     break
                 }
             }
 
             val session = currentSession
-            if (session != null && running) {
+            if (session != null && session.hasVideo && running) {
                 RtpInterleaved.readLoop(
                     inputStream = inputStream,
                     onVideoNalUnit = { nalUnit, ptsUs ->
@@ -437,42 +441,33 @@ open class RtspHandler(
             .firstOrNull { it.substringBefore('=') == key }
             ?.substringAfter('=', "")
 
-    /**
-     * POST /feedback — macOS health-checks the session every ~2 s. We log the body (DIAGNOSTIC:
-     * to learn whether macOS expects per-stream status here when audio is active) and reply 200 OK.
-     */
+    /** POST /feedback — macOS health-checks the session every ~2 s; acknowledge with 200 OK. */
     private fun handleFeedback(request: RtspRequest): RtspResponse {
         val n = request.bodyBytes.size
         if (n > 0) {
             runCatching {
                 val p = PlistCodec.decode(request.bodyBytes)
-                Logger.i("/feedback body ($n B): " + p.entries.joinToString { (k, v) ->
+                Logger.d("/feedback body ($n B): " + p.entries.joinToString { (k, v) ->
                     "$k=" + when (v) { is ByteArray -> "${v.size}B"; is List<*> -> "list[${v.size}]"; else -> v.toString() }
                 })
-            }.onFailure { Logger.i("/feedback body ($n B, non-plist)") }
-        } else {
-            Logger.d("/feedback (empty)")
+            }.onFailure { Logger.d("/feedback body ($n B, non-plist)") }
         }
         return RtspResponse(200, "OK", protocol = request.responseProtocol())
     }
 
     /**
      * Acknowledges an AirPlay 2 buffered-audio control verb (SETRATEANCHORTIME / SETPEERS /
-     * FLUSHBUFFERED) and logs its body for protocol capture. Returning 200 keeps audio-only
-     * playback alive; a 501 would make macOS abort. Decode/scheduling is built once the formats
-     * are confirmed from these logs.
+     * FLUSHBUFFERED). Returning 200 keeps an audio-only session alive (a 501 would make macOS abort).
      */
     private fun handleBufferedControl(request: RtspRequest, label: String): RtspResponse {
         val n = request.bodyBytes.size
         if (n > 0) {
             runCatching {
                 val p = PlistCodec.decode(request.bodyBytes)
-                Logger.i("$label body ($n B): " + p.entries.joinToString { (k, v) ->
+                Logger.d("$label body ($n B): " + p.entries.joinToString { (k, v) ->
                     "$k=" + when (v) { is ByteArray -> "${v.size}B"; is List<*> -> "list[${v.size}]"; else -> v.toString() }
                 })
-            }.onFailure { Logger.i("$label body ($n B, non-plist): ${request.body.take(120)}") }
-        } else {
-            Logger.i("$label (empty body)")
+            }.onFailure { Logger.d("$label body ($n B, non-plist)") }
         }
         return RtspResponse(200, "OK", protocol = request.responseProtocol())
     }
@@ -592,12 +587,17 @@ open class RtspHandler(
     /** POST /fp-setup — FairPlay: 16-byte phase 1 → 142-byte reply; 164-byte phase 2 → 32-byte reply. */
     private fun handleFpSetup(request: RtspRequest): RtspResponse = try {
         val fp = fairPlay!!
-        val body = when (request.bodyBytes.size) {
-            16 -> fp.setup(request.bodyBytes)
-            164 -> fp.handshake(request.bodyBytes)
-            else -> throw IllegalArgumentException("unexpected fp-setup size ${request.bodyBytes.size}")
+        val b = request.bodyBytes
+        // Diagnostics: byte 4 is the FairPlay version (0x03 mirroring/Safari, 0x02 Apple Music audio);
+        // for phase 1, byte 14 is the mode (0..3). Confirms which path a given sender uses.
+        val verMode = if (b.size >= 16) " v=0x%02x mode=%d".format(b[4].toInt() and 0xFF, b[14].toInt() and 0xFF)
+                      else if (b.size >= 5) " v=0x%02x".format(b[4].toInt() and 0xFF) else ""
+        val body = when (b.size) {
+            16 -> fp.setup(b)
+            164 -> fp.handshake(b)
+            else -> throw IllegalArgumentException("unexpected fp-setup size ${b.size}")
         }
-        Logger.i("fp-setup phase (${request.bodyBytes.size}B in → ${body.size}B out) OK")
+        Logger.i("fp-setup phase (${b.size}B in → ${body.size}B out)$verMode OK")
         RtspResponse(200, "OK", bodyBytes = body, contentType = OCTET_STREAM, protocol = request.responseProtocol())
     } catch (e: Exception) {
         Logger.e("fp-setup failed", e)
@@ -648,9 +648,8 @@ open class RtspHandler(
                         mapOf("type" to 110L, "dataPort" to dataPort.toLong())
                     }
                     96 -> {
-                        // DIAGNOSTIC: dump every field macOS sends for the realtime-audio stream —
-                        // codec type (ct), samples-per-frame (spf), latencies, encryption (et), etc.
-                        Logger.i("mirror stream type=96 dict: " + stream.entries.joinToString { (k, v) ->
+                        // Realtime-audio stream fields (codec type ct, samples-per-frame spf, latencies, …).
+                        Logger.d("mirror stream type=96 dict: " + stream.entries.joinToString { (k, v) ->
                             "$k=" + when (v) { is ByteArray -> "${v.size}B"; is List<*> -> "list[${v.size}]"; else -> v.toString() }
                         })
                         if (!audioEnabled) {
@@ -667,10 +666,10 @@ open class RtspHandler(
                         mapOf("type" to 96L, "dataPort" to dataPort.toLong(), "controlPort" to controlPort.toLong())
                     }
                     103 -> {
-                        // Buffered (audio-only) AirPlay — Apple Music / Control Center → TV, no mirror.
-                        // DIAGNOSTIC: dump the full stream dict (codec type ct, audioFormat, shk/shiv
-                        // keys, latencies) so the wire format can be confirmed before building decode.
-                        Logger.i("buffered audio stream type=103 dict: " + stream.entries.joinToString { (k, v) ->
+                        // Buffered (audio-only) AirPlay 2 — accepted + instrumented, but the macOS
+                        // Music stream stays FairPlay-encrypted (undecryptable), so playback is not
+                        // wired. Stream fields (codec ct, audioFormat, shk/shiv, latencies) logged for ref.
+                        Logger.d("buffered audio stream type=103 dict: " + stream.entries.joinToString { (k, v) ->
                             "$k=" + when (v) { is ByteArray -> "${v.size}B"; is List<*> -> "list[${v.size}]"; else -> v.toString() }
                         })
                         if (!audioEnabled) {
@@ -775,12 +774,26 @@ open class RtspHandler(
                 protocol = request.responseProtocol()
             )
         }
-        val session = currentSession
+        var session = currentSession
         if (session == null) {
             Logger.e("RECORD received but no session from ANNOUNCE — rejecting")
             return RtspResponse(statusCode = 455, statusMessage = "Method Not Valid in This State")
         }
-        Logger.i("RECORD — streaming starting (audioOnly=${session.isAudioOnly})")
+        // RAOP audio (Apple Music) wraps the AES key with FairPlay (SDP `fpaeskey`). Unwrap it via the
+        // fp-setup session into the real 16-byte key so the AudioPlayer can AES-CBC-decrypt the stream.
+        val fpKey = session.fpAesKey
+        if (fpKey != null && session.aesKey == null) {
+            val realKey = runCatching { fairPlay?.decrypt(fpKey) }
+                .onFailure { Logger.w("RAOP FairPlay audio-key decrypt failed (${fpKey.size}B): ${it.message}") }
+                .getOrNull()
+            if (realKey != null) {
+                Logger.i("RAOP FairPlay (v0x%02x) audio key decrypted → ${realKey.size}B AES key, iv=${session.aesIv?.size ?: 0}B"
+                    .format(fairPlay?.negotiatedVersion ?: 0))
+                session = session.copy(aesKey = realKey)
+                currentSession = session
+            }
+        }
+        Logger.i("RECORD — streaming starting (audioOnly=${session.isAudioOnly}, encrypted=${session.isAudioEncrypted})")
         onStreamingStarted(session)
         return RtspResponse(statusCode = 200, statusMessage = "OK")
     }
