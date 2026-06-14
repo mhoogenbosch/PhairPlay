@@ -105,20 +105,26 @@ object NetworkUtils {
      * @return A stable UUID string in standard "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" format.
      */
     fun getPersistentUuid(context: Context): String {
-        // Try to read previously stored UUID
-        val storedUuid = Settings.Secure.getString(context.contentResolver, PREF_KEY_DEVICE_UUID)
+        // Persist the UUID in the app's own private SharedPreferences.
+        // (Originally this used Settings.Secure, which requires the privileged
+        // WRITE_SECURE_SETTINGS permission and threw a SecurityException on normal
+        // installs, aborting AirPlay receiver startup. App-private storage needs no
+        // permission and still persists across restarts.)
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val storedUuid = prefs.getString(PREF_KEY_DEVICE_UUID, null)
         if (!storedUuid.isNullOrBlank()) {
             return storedUuid
         }
 
         // Generate a new UUID and store it for future use
         val newUuid = UUID.randomUUID().toString()
-        Settings.Secure.putString(context.contentResolver, PREF_KEY_DEVICE_UUID, newUuid)
+        prefs.edit().putString(PREF_KEY_DEVICE_UUID, newUuid).apply()
         return newUuid
     }
 
     // Constants
     private const val DEFAULT_DEVICE_NAME = "PhairPlay"
     private const val FALLBACK_MAC_ADDRESS = "aa:bb:cc:dd:ee:ff"
+    private const val PREFS_NAME = "phairplay_prefs"
     private const val PREF_KEY_DEVICE_UUID = "phairplay_device_uuid"
 }

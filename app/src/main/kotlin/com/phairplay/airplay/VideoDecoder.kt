@@ -38,6 +38,14 @@ class VideoDecoder(private val outputSurface: Surface) {
     private var isInitialized = false
 
     /**
+     * False once MediaCodec has thrown (entered an unrecoverable error state). The caller should
+     * drop this decoder and create a fresh one — error state cannot be cleared by reconfigure.
+     */
+    @Volatile
+    var isHealthy = true
+        private set
+
+    /**
      * Initializes the MediaCodec decoder with the video stream parameters from the SDP.
      *
      * This must be called ONCE before any calls to [decodeNalUnit].
@@ -64,15 +72,23 @@ class VideoDecoder(private val outputSurface: Surface) {
             return
         }
 
-        // Try to extract actual resolution from the SPS NAL unit.
-        // If parsing fails (e.g., unsupported profile), fall back to the hint dimensions.
-        val (actualWidth, actualHeight) = Companion.parseSpsResolution(spsBytes) ?: run {
-            Logger.d("SPS parsing failed or skipped — using hint: ${width}x${height}")
+        // Try to extract actual resolution from the SPS NAL unit. The parser can misread some senders'
+        // SPS (e.g. iPhone) and return nonsense like 32x87392 — configuring MediaCodec with that wedges
+        // the decoder (no input buffers, no frames). Validate the result and fall back to the hint; the
+        // hardware decoder reads the true size from the SPS (csd-0) itself and reports it via
+        // INFO_OUTPUT_FORMAT_CHANGED, which we use to refine the size for aspect-fit.
+        val parsed = Companion.parseSpsResolution(spsBytes)
+        val (actualWidth, actualHeight) = parsed?.takeIf { isPlausibleSize(it.first, it.second) } ?: run {
+            Logger.w("SPS resolution $parsed implausible/failed — using hint ${width}x${height}")
             Pair(width, height)
         }
 
         Logger.i("Initializing H.264 decoder: ${actualWidth}x${actualHeight} " +
                  "(hint was ${width}x${height})")
+
+        // Provisional size for StreamingScreen aspect-fit; replaced by the decoder's reported size.
+        StreamStats.videoWidth = actualWidth
+        StreamStats.videoHeight = actualHeight
 
         // Create the MediaFormat that describes the H.264 stream to the hardware decoder
         val format = MediaFormat.createVideoFormat(
@@ -84,6 +100,9 @@ class VideoDecoder(private val outputSurface: Surface) {
             // These are wrapped in ByteBuffers as required by the MediaCodec API.
             setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(spsBytes))  // SPS
             setByteBuffer("csd-1", java.nio.ByteBuffer.wrap(ppsBytes))  // PPS
+            // NOTE: do NOT set KEY_MAX_WIDTH/HEIGHT here — this SoC's MStar decoder rejects
+            // adaptive playback (BadParameter / buffer-count failures) and produces banding.
+            // Resolution changes are handled by recreating the decoder in MirrorStreamServer.
         }
 
         // Create the hardware H.264 decoder.
@@ -127,9 +146,13 @@ class VideoDecoder(private val outputSurface: Surface) {
         }
 
         try {
-            // Request an input buffer from MediaCodec.
-            // timeout = 10ms: if no buffer is available (decoder is full), we wait briefly.
-            // In a healthy system, buffers are always available; the timeout prevents hangs.
+            // Drain finished frames FIRST — renders them and frees the pipeline so an input
+            // buffer becomes available. Dropping NAL units corrupts H.264 (loses reference
+            // frames) and causes a black screen until the next keyframe, so we avoid it.
+            releaseOutputBuffers(codec)
+
+            // Wait for an input buffer. Longer than before: on a modest SoC the decoder can
+            // briefly fall behind, and waiting beats dropping (which corrupts the stream).
             val inputBufferIndex = codec.dequeueInputBuffer(INPUT_BUFFER_TIMEOUT_US)
 
             if (inputBufferIndex >= 0) {
@@ -157,6 +180,10 @@ class VideoDecoder(private val outputSurface: Surface) {
             // render=true means the frame goes to the Surface immediately.
             releaseOutputBuffers(codec)
 
+        } catch (e: IllegalStateException) {
+            // MediaCodec is now in the error state and cannot recover — flag for recreation.
+            Logger.e("VideoDecoder entered error state — will recreate", e)
+            isHealthy = false
         } catch (e: Exception) {
             Logger.e("Error decoding NAL unit", e)
         }
@@ -178,10 +205,33 @@ class VideoDecoder(private val outputSurface: Surface) {
         val bufferInfo = MediaCodec.BufferInfo()
         var outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
 
-        while (outputBufferIndex >= 0) {
-            // render=true: display this decoded frame on the Surface
-            codec.releaseOutputBuffer(outputBufferIndex, true)
+        while (outputBufferIndex >= 0 || outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+            if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                // The decoder parsed the real size from the SPS — authoritative for aspect-fit.
+                publishOutputSize(codec.outputFormat)
+            } else {
+                // Render immediately. We deliberately do NOT schedule a future render time for A/V sync:
+                // this Surface's BufferQueue holds only ~3 frames, so any hold quickly back-pressures the
+                // decoder → the upstream frame queue saturates → big latency + dropped (corrupt) frames.
+                // A/V alignment is handled by keeping the AUDIO path low-latency instead (AudioStreamServer).
+                codec.releaseOutputBuffer(outputBufferIndex, true)
+            }
             outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
+        }
+    }
+
+    /** Reads the decoder's true display size (honouring the crop rectangle) for StreamingScreen. */
+    private fun publishOutputSize(format: MediaFormat) {
+        var w = format.getInteger(MediaFormat.KEY_WIDTH)
+        var h = format.getInteger(MediaFormat.KEY_HEIGHT)
+        if (format.containsKey("crop-left") && format.containsKey("crop-right")) {
+            w = format.getInteger("crop-right") - format.getInteger("crop-left") + 1
+            h = format.getInteger("crop-bottom") - format.getInteger("crop-top") + 1
+        }
+        if (isPlausibleSize(w, h)) {
+            StreamStats.videoWidth = w
+            StreamStats.videoHeight = h
+            Logger.i("Video output size ${w}x$h")
         }
     }
 
@@ -208,10 +258,14 @@ class VideoDecoder(private val outputSurface: Surface) {
         }
     }
 
+    /** True if (w, h) look like a real video resolution — rejects parser garbage (e.g. 32x87392). */
+    private fun isPlausibleSize(w: Int, h: Int): Boolean = w in 64..8192 && h in 64..8192
+
     companion object {
-        // How long to wait for an input buffer before giving up (microseconds)
-        // 10ms = 10,000µs. This is a short wait to keep latency low.
-        private const val INPUT_BUFFER_TIMEOUT_US = 10_000L
+        // How long to wait for an input buffer before dropping (microseconds).
+        // 100ms — generous enough that the decoder rarely has to drop a NAL unit (which would
+        // corrupt the stream), while still bounding stall if the codec is truly wedged.
+        private const val INPUT_BUFFER_TIMEOUT_US = 100_000L
 
         /**
          * Parses the H.264 SPS NAL unit to extract the actual video resolution.

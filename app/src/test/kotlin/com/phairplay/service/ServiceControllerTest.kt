@@ -9,6 +9,9 @@ import io.mockk.verify
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * ServiceControllerTest — Unit tests for [ServiceController].
@@ -28,9 +31,12 @@ import org.junit.Test
  *
  * NOTE: ServiceController uses Context.startForegroundService (API 26+) or
  * Context.startService (API < 26) — no AndroidX dependency.
- * In the JVM test environment Build.VERSION.SDK_INT = 34 (android-all stubs),
- * so startForegroundService is called for start() and restart().
+ * Runs under Robolectric so android.content.Intent (action/component) behaves for real; the
+ * Context is still a MockK relaxed mock so we can capture the dispatched Intent. @Config sdk=34
+ * means Build.VERSION.SDK_INT = 34, so startForegroundService is used for start() and restart().
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class ServiceControllerTest {
 
     private lateinit var context: Context

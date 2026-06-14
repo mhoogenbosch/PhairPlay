@@ -161,6 +161,7 @@ Not everything in the full product spec is proven end-to-end yet. AirPlay, Mirac
 - **Audio-only AirPlay** (streaming from Apple Music app) is not fully supported in v1.0.
 - If your router has **AP isolation** or **multicast filtering** enabled, PhairPlay may not appear in the AirPlay menu. Disable these settings on your router.
 - On very busy 2.4 GHz Wi-Fi networks, you may experience latency above 100ms. Use 5 GHz or Ethernet for best results.
+- **No sender authentication.** The AirPlay 2 pairing PhairPlay implements is non-authenticating (no PIN/password), so **any device on the same network can mirror to the TV**. Run PhairPlay only on a trusted LAN; do not expose port 7000 to untrusted networks.
 
 For real-device failures, run `tools/collect-device-logs.sh` before restarting the app. It captures package state, memory, CPU, and filtered PhairPlay logs into `device-test-logs/`.
 

@@ -22,6 +22,7 @@ val castAppId: String =
 android {
     namespace = "com.phairplay"
     compileSdk = 35
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         // applicationId is overridden per flavor below
@@ -32,6 +33,21 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "CAST_APP_ID", "\"${castAppId.escapedForBuildConfig()}\"")
+
+        // Native FairPlay (libplayfair.so) — build for all Android ABIs so PhairPlay runs on
+        // the full range of Android TV / Fire TV hardware (32- and 64-bit ARM, plus x86/x86_64
+        // for Intel devices, ChromeOS, and emulators). Required for Google Play 64-bit compliance.
+        ndk {
+            abiFilters += setOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+        }
+    }
+
+    // Native build: RPiPlay's FairPlay (playfair) compiled via CMake → libplayfair.so.
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     // Two flavors: one for Google TV, one for Amazon Fire TV.
@@ -123,9 +139,15 @@ android {
             "DataExtractionRules",
             "DiscouragedApi",
             "MonochromeLauncherIcon",
+            // Launcher-icon shape is advisory; on Android TV the banner is the primary
+            // artwork and the icon is rarely shown (sibling of MonochromeLauncherIcon above).
+            "IconLauncherShape",
             "ObsoleteSdkInt",
             "Overdraw",
-            "UnusedResources"
+            "UnusedResources",
+            // Advisory: the project deliberately supports a wide API range for old TVs;
+            // targetSdk is bumped deliberately, not on every new platform release.
+            "OldTargetApi"
         )
     }
 
@@ -178,6 +200,9 @@ dependencies {
     // Cryptography — AES-128-CTR for audio decryption, future SRP-6a pairing
     implementation(libs.bouncycastle)
 
+    // Binary property lists — AirPlay 2 handshake payloads (GET /info, SETUP)
+    implementation(libs.ddplist)
+
     // Google TV Cast Connect receiver SDK. Kept out of the Fire TV flavor because
     // Fire TV lacks Google Play Services and cannot run Google Cast receiver APIs.
     "googletvImplementation"(libs.play.services.cast.tv)
@@ -186,6 +211,8 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
     testImplementation(libs.kotlinx.coroutines.test)
+    // Robolectric — real Android framework classes (Intent, Base64, …) in JVM unit tests
+    testImplementation(libs.robolectric)
 
     // Instrumented Testing (on device)
     androidTestImplementation(libs.androidx.test.ext.junit)

@@ -20,8 +20,11 @@ import com.phairplay.service.PhairPlayService
 import com.phairplay.service.PhotoFrame
 import com.phairplay.service.ProtocolState
 import com.phairplay.service.ServiceController
+import com.phairplay.airplay.NowPlayingInfo
 import com.phairplay.ui.HomeFragment
+import com.phairplay.ui.NowPlayingScreen
 import com.phairplay.ui.PhotoScreen
+import com.phairplay.ui.PinScreen
 import com.phairplay.ui.SettingsFragment
 import com.phairplay.ui.StreamingScreen
 import kotlinx.coroutines.flow.collectLatest
@@ -57,12 +60,16 @@ class MainActivity : AppCompatActivity() {
     // The SurfaceView for full-screen video output
     private lateinit var streamingScreen: StreamingScreen
     private lateinit var photoScreen: PhotoScreen
+    private lateinit var nowPlayingScreen: NowPlayingScreen
+    private lateinit var pinScreen: PinScreen
 
     // Service binding — gives access to state flows for showing/hiding the streaming overlay
     private var service: PhairPlayService? = null
     private var isBound = false
     private var currentAirPlayState = ProtocolState.DISABLED
     private var currentPhotoFrame: PhotoFrame? = null
+    private var currentNowPlaying: NowPlayingInfo? = null
+    private var currentPin: String? = null
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -127,9 +134,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // Note: we do NOT stop the service here. The service runs independently of the
-        // Activity lifecycle. Users stop it via the notification or the Stop button.
-        Timber.d("MainActivity destroyed")
+        // A user-initiated exit (Back out of the app) should end any active mirror — closing the
+        // service stops the receiver, which drops the RTSP connection so the sender stops mirroring
+        // too. isFinishing distinguishes a real exit from a config-change recreation (where the
+        // service must keep running). Backgrounding via Home goes through onStop only (no destroy),
+        // so the receiver keeps advertising for a quick return.
+        if (isFinishing) {
+            Timber.d("MainActivity finishing — stopping service so mirroring doesn't linger")
+            ServiceController.stop(this)
+        } else {
+            Timber.d("MainActivity destroyed (recreation) — leaving service running")
+        }
     }
 
     // ─── View Setup ──────────────────────────────────────────────────────────
@@ -148,9 +163,15 @@ class MainActivity : AppCompatActivity() {
     private fun setupOverlayScreens() {
         streamingScreen = StreamingScreen(this)
         photoScreen = PhotoScreen(this)
+        nowPlayingScreen = NowPlayingScreen(this)
+        pinScreen = PinScreen(this)
         streamingContainer.addView(streamingScreen)
         streamingContainer.addView(photoScreen)
+        streamingContainer.addView(nowPlayingScreen)
+        streamingContainer.addView(pinScreen)
         photoScreen.visibility = View.GONE
+        nowPlayingScreen.visibility = View.GONE
+        pinScreen.visibility = View.GONE
     }
 
     /**
@@ -214,6 +235,9 @@ class MainActivity : AppCompatActivity() {
      */
     fun showStreamingScreen() {
         photoScreen.visibility = View.GONE
+        nowPlayingScreen.visibility = View.GONE
+        nowPlayingScreen.clear()
+        pinScreen.visibility = View.GONE
         streamingScreen.visibility = View.VISIBLE
         streamingContainer.visibility = View.VISIBLE
         streamingContainer.bringToFront()
@@ -222,10 +246,23 @@ class MainActivity : AppCompatActivity() {
     fun showPhotoScreen(photoFrame: PhotoFrame) {
         if (photoScreen.showPhoto(photoFrame.bytes)) {
             streamingScreen.visibility = View.GONE
+            nowPlayingScreen.visibility = View.GONE
+            pinScreen.visibility = View.GONE
             photoScreen.visibility = View.VISIBLE
             streamingContainer.visibility = View.VISIBLE
             streamingContainer.bringToFront()
         }
+    }
+
+    /** Shows the audio-only now-playing card (AirPlay audio with no video). */
+    fun showNowPlayingScreen(info: NowPlayingInfo) {
+        nowPlayingScreen.update(info)
+        streamingScreen.visibility = View.GONE
+        photoScreen.visibility = View.GONE
+        pinScreen.visibility = View.GONE
+        nowPlayingScreen.visibility = View.VISIBLE
+        streamingContainer.visibility = View.VISIBLE
+        streamingContainer.bringToFront()
     }
 
     /**
@@ -235,12 +272,44 @@ class MainActivity : AppCompatActivity() {
     fun hideStreamingScreen() {
         photoScreen.clearPhoto()
         photoScreen.visibility = View.GONE
+        nowPlayingScreen.clear()
+        nowPlayingScreen.visibility = View.GONE
+        pinScreen.visibility = View.GONE
         streamingScreen.visibility = View.VISIBLE
         streamingContainer.visibility = View.GONE
     }
 
     /** Returns the SurfaceView Surface for the VideoDecoder. */
     fun getVideoSurface() = streamingScreen.getSurface()
+
+    /**
+     * Routes TV-remote media keys to the AirPlay sender (DACP reverse control) while audio-only or a
+     * stream is showing — so the remote can play/pause/skip what the Mac/iPhone is streaming. Returns
+     * false for other keys so normal navigation is unaffected.
+     */
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        val overlayActive = currentNowPlaying != null || currentAirPlayState == ProtocolState.CONNECTED
+        if (overlayActive) {
+            val command = when (keyCode) {
+                android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                android.view.KeyEvent.KEYCODE_MEDIA_PLAY,
+                android.view.KeyEvent.KEYCODE_MEDIA_PAUSE,
+                android.view.KeyEvent.KEYCODE_DPAD_CENTER -> com.phairplay.airplay.DacpClient.CMD_PLAY_PAUSE
+                android.view.KeyEvent.KEYCODE_MEDIA_NEXT,
+                android.view.KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD -> com.phairplay.airplay.DacpClient.CMD_NEXT
+                android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                android.view.KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD -> com.phairplay.airplay.DacpClient.CMD_PREV
+                android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> com.phairplay.airplay.DacpClient.CMD_FF
+                android.view.KeyEvent.KEYCODE_MEDIA_REWIND -> com.phairplay.airplay.DacpClient.CMD_REW
+                else -> null
+            }
+            if (command != null) {
+                service?.sendAirPlayRemoteCommand(command)
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
 
     /**
      * Requests POST_NOTIFICATIONS permission on Android 13+ (API 33+).
@@ -288,14 +357,44 @@ class MainActivity : AppCompatActivity() {
                 updateOverlay()
             }
         }
+        lifecycleScope.launch {
+            svc.nowPlaying.collectLatest { info ->
+                currentNowPlaying = info
+                updateOverlay()
+            }
+        }
+        lifecycleScope.launch {
+            svc.pairingPin.collectLatest { pin ->
+                currentPin = pin
+                updateOverlay()
+            }
+        }
     }
 
     private fun updateOverlay() {
         val photoFrame = currentPhotoFrame
+        val nowPlaying = currentNowPlaying
+        val pin = currentPin
         when {
+            // PIN pairing (access control) happens before streaming — show the code over everything.
+            pin != null -> showPinScreen(pin)
+            // Audio-only AirPlay (system audio, Music, podcasts): show the now-playing card instead
+            // of the black video surface. Set whenever audio plays without video.
+            nowPlaying != null -> showNowPlayingScreen(nowPlaying)
             currentAirPlayState == ProtocolState.CONNECTED -> showStreamingScreen()
             photoFrame != null -> showPhotoScreen(photoFrame)
             else -> hideStreamingScreen()
         }
+    }
+
+    /** Shows the AirPlay pairing PIN over the full screen during SRP pair-setup. */
+    fun showPinScreen(pin: String) {
+        pinScreen.setPin(pin)
+        streamingScreen.visibility = View.GONE
+        photoScreen.visibility = View.GONE
+        nowPlayingScreen.visibility = View.GONE
+        pinScreen.visibility = View.VISIBLE
+        streamingContainer.visibility = View.VISIBLE
+        streamingContainer.bringToFront()
     }
 }

@@ -110,9 +110,15 @@ class TimingHandler {
             val buf = ByteArray(PACKET_SIZE)
             val packet = DatagramPacket(buf, buf.size)
 
+            var firstProbe = true
             while (scope.isActive) {
                 // receive() blocks until a packet arrives or socket is closed
                 sock.receive(packet)
+                if (firstProbe) {
+                    Logger.i("Timing: first probe from ${packet.address?.hostAddress} " +
+                        "(${packet.length}B, type 0x${(packet.data[1].toInt() and 0xFF).toString(16)})")
+                    firstProbe = false
+                }
                 val receiveNtp = currentNtpTimestamp()
                 handleProbe(packet, receiveNtp)
             }

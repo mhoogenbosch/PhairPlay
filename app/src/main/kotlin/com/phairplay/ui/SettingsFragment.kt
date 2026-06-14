@@ -2,6 +2,7 @@ package com.phairplay.ui
 
 import android.app.AlertDialog
 import android.os.Bundle
+import com.phairplay.service.ServiceController
 import android.text.InputFilter
 import android.text.InputType
 import android.view.LayoutInflater
@@ -52,9 +53,11 @@ class SettingsFragment : Fragment() {
     private lateinit var rowAirPlay: View
     private lateinit var rowMiracast: View
     private lateinit var rowCast: View
-    private lateinit var rowAirPlayPin: View
+    private lateinit var rowMirrorAudio: View
+    private lateinit var rowPinAuth: View
     private lateinit var rowStartOnBoot: View
     private lateinit var rowDebugOverlay: View
+    private lateinit var rowForceHighRes: View
     private lateinit var textVersionValue: TextView
     private lateinit var rowReset: LinearLayout
 
@@ -73,21 +76,26 @@ class SettingsFragment : Fragment() {
     // ─── View Binding ────────────────────────────────────────────────────────
 
     private fun bindViews(view: View) {
-        headerDisplay   = view.findViewById<View>(R.id.header_display).findViewById(R.id.text_section_title)
-        headerProtocols = view.findViewById<View>(R.id.header_protocols).findViewById(R.id.text_section_title)
-        headerAirPlay   = view.findViewById<View>(R.id.header_airplay).findViewById(R.id.text_section_title)
-        headerService   = view.findViewById<View>(R.id.header_service).findViewById(R.id.text_section_title)
-        headerDeveloper = view.findViewById<View>(R.id.header_developer).findViewById(R.id.text_section_title)
-        headerAbout     = view.findViewById<View>(R.id.header_about).findViewById(R.id.text_section_title)
+        // Each header is an <include> of settings_section_header.xml (a bare
+        // TextView). The include's android:id IS the TextView's id, so look it up
+        // directly — no nested lookup.
+        headerDisplay   = view.findViewById(R.id.header_display)
+        headerProtocols = view.findViewById(R.id.header_protocols)
+        headerAirPlay   = view.findViewById(R.id.header_airplay)
+        headerService   = view.findViewById(R.id.header_service)
+        headerDeveloper = view.findViewById(R.id.header_developer)
+        headerAbout     = view.findViewById(R.id.header_about)
 
         rowDisplayName      = view.findViewById(R.id.row_display_name)
         textDisplayNameValue = view.findViewById(R.id.text_display_name_value)
         rowAirPlay          = view.findViewById(R.id.row_airplay)
         rowMiracast         = view.findViewById(R.id.row_miracast)
         rowCast             = view.findViewById(R.id.row_cast)
-        rowAirPlayPin       = view.findViewById(R.id.row_airplay_pin)
+        rowMirrorAudio      = view.findViewById(R.id.row_mirror_audio)
+        rowPinAuth          = view.findViewById(R.id.row_pin_auth)
         rowStartOnBoot      = view.findViewById(R.id.row_start_on_boot)
         rowDebugOverlay     = view.findViewById(R.id.row_debug_overlay)
+        rowForceHighRes     = view.findViewById(R.id.row_force_high_res)
         textVersionValue    = view.findViewById(R.id.text_version_value)
         rowReset            = view.findViewById(R.id.row_reset)
     }
@@ -107,9 +115,11 @@ class SettingsFragment : Fragment() {
         configureToggleRow(rowAirPlay,      R.string.setting_airplay_enabled,    R.string.setting_airplay_subtitle)
         configureToggleRow(rowMiracast,     R.string.setting_miracast_enabled,   R.string.setting_miracast_subtitle)
         configureToggleRow(rowCast,         R.string.setting_cast_enabled,       R.string.setting_cast_subtitle)
-        configureToggleRow(rowAirPlayPin,   R.string.setting_airplay_pin,        R.string.setting_airplay_pin_subtitle)
+        configureToggleRow(rowMirrorAudio,  R.string.setting_mirror_audio,       R.string.setting_mirror_audio_subtitle)
+        configureToggleRow(rowPinAuth,      R.string.setting_pin_auth,           R.string.setting_pin_auth_subtitle)
         configureToggleRow(rowStartOnBoot,  R.string.setting_start_on_boot,      0)
         configureToggleRow(rowDebugOverlay, R.string.setting_debug_overlay,      R.string.setting_debug_overlay_subtitle)
+        configureToggleRow(rowForceHighRes, R.string.setting_force_high_res,      R.string.setting_force_high_res_subtitle)
 
         textVersionValue.text = BuildConfig.VERSION_NAME
     }
@@ -154,9 +164,11 @@ class SettingsFragment : Fragment() {
         setToggle(rowAirPlay,      settings.airPlayEnabled)
         setToggle(rowMiracast,     settings.miracastEnabled)
         setToggle(rowCast,         settings.castEnabled)
-        setToggle(rowAirPlayPin,   settings.airPlayPinAuthEnabled)
+        setToggle(rowMirrorAudio,  settings.mirrorAudioEnabled)
+        setToggle(rowPinAuth,      settings.airPlayPinAuthEnabled)
         setToggle(rowStartOnBoot,  settings.startOnBoot)
         setToggle(rowDebugOverlay, settings.showDebugOverlay)
+        setToggle(rowForceHighRes, settings.forceHighResolution)
     }
 
     private fun setToggle(row: View, value: Boolean) {
@@ -176,9 +188,11 @@ class SettingsFragment : Fragment() {
         setToggleListener(rowAirPlay)      { enabled -> save { it.copy(airPlayEnabled = enabled) } }
         setToggleListener(rowMiracast)     { enabled -> save { it.copy(miracastEnabled = enabled) } }
         setToggleListener(rowCast)         { enabled -> save { it.copy(castEnabled = enabled) } }
-        setToggleListener(rowAirPlayPin)   { enabled -> save { it.copy(airPlayPinAuthEnabled = enabled) } }
+        setToggleListener(rowMirrorAudio)  { enabled -> saveAndRestart { it.copy(mirrorAudioEnabled = enabled) } }
+        setToggleListener(rowPinAuth)      { enabled -> saveAndRestart { it.copy(airPlayPinAuthEnabled = enabled) } }
         setToggleListener(rowStartOnBoot)  { enabled -> save { it.copy(startOnBoot = enabled) } }
         setToggleListener(rowDebugOverlay) { enabled -> save { it.copy(showDebugOverlay = enabled) } }
+        setToggleListener(rowForceHighRes) { enabled -> save { it.copy(forceHighResolution = enabled) } }
 
         rowReset.setOnClickListener { resetSettings() }
     }
@@ -203,6 +217,18 @@ class SettingsFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             settingsRepository.update(transform)
             Logger.d("Settings saved")
+        }
+    }
+
+    /**
+     * Saves a setting that the AirPlay receiver only reads at startup (mirror-audio, PIN auth), then
+     * restarts the service so the change applies immediately instead of on the next manual restart.
+     */
+    private fun saveAndRestart(transform: (AppSettings) -> AppSettings) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            settingsRepository.update(transform)
+            ServiceController.restart(requireContext())
+            Logger.i("Settings saved — restarting receivers to apply")
         }
     }
 

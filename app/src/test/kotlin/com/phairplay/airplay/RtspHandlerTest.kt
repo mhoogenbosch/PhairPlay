@@ -1,10 +1,12 @@
 package com.phairplay.airplay
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import com.phairplay.airplay.handshake.PlistCodec
 
 /**
  * RtspHandlerTest — Unit tests for the RTSP protocol implementation.
@@ -29,6 +31,8 @@ class RtspHandlerTest {
     private var photoReceived = false
     private var photoCleared = false
     private var lastPhotoType: PhotoImageType? = null
+    private var audioStopped = false
+    private var videoStopped = false
 
     @Before
     fun setup() {
@@ -38,6 +42,8 @@ class RtspHandlerTest {
         photoReceived = false
         photoCleared = false
         lastPhotoType = null
+        audioStopped = false
+        videoStopped = false
     }
 
     // ─── OPTIONS ─────────────────────────────────────────────────────────────
@@ -199,6 +205,55 @@ class RtspHandlerTest {
         assertEquals(200, response.statusCode)
     }
 
+    @Test
+    fun `TEARDOWN of audio stream stops audio and keeps video session alive`() {
+        val handler = createTestHandler()
+        handler.seedActiveStreams(96, 110)
+        handler.handleTeardownPublic(teardownRequest(teardownBody(96)))
+        assertTrue("audio should be stopped", audioStopped)
+        assertFalse("video should NOT be stopped", videoStopped)
+        assertFalse("session must stay alive while video remains", streamingStopped)
+    }
+
+    @Test
+    fun `TEARDOWN of video stream stops video and keeps audio session alive`() {
+        val handler = createTestHandler()
+        handler.seedActiveStreams(96, 110)
+        handler.handleTeardownPublic(teardownRequest(teardownBody(110)))
+        assertTrue("video should be stopped", videoStopped)
+        assertFalse("audio should NOT be stopped", audioStopped)
+        assertFalse("session must stay alive while audio remains", streamingStopped)
+    }
+
+    @Test
+    fun `TEARDOWN naming all streams ends the session`() {
+        val handler = createTestHandler()
+        handler.seedActiveStreams(96, 110)
+        handler.handleTeardownPublic(teardownRequest(teardownBody(96, 110)))
+        assertTrue("audio should be stopped", audioStopped)
+        assertTrue("video should be stopped", videoStopped)
+        assertTrue("session should end when the last stream is removed", streamingStopped)
+    }
+
+    @Test
+    fun `TEARDOWN of the last remaining stream ends the session`() {
+        val handler = createTestHandler()
+        handler.seedActiveStreams(110)
+        handler.handleTeardownPublic(teardownRequest(teardownBody(110)))
+        assertTrue("video should be stopped", videoStopped)
+        assertTrue("session should end when no streams remain", streamingStopped)
+    }
+
+    @Test
+    fun `TEARDOWN of an unknown stream type leaves the active session untouched`() {
+        val handler = createTestHandler()
+        handler.seedActiveStreams(110)
+        handler.handleTeardownPublic(teardownRequest(teardownBody(200)))
+        assertFalse("no known stream named — nothing stopped", videoStopped)
+        assertFalse("no known stream named — nothing stopped", audioStopped)
+        assertFalse("session with active streams must stay alive", streamingStopped)
+    }
+
     // ─── Unknown method ───────────────────────────────────────────────────────
 
     @Test
@@ -276,8 +331,17 @@ class RtspHandlerTest {
             photoReceived = true
             lastPhotoType = imageType
         },
-        onPhotoCleared = { photoCleared = true }
+        onPhotoCleared = { photoCleared = true },
+        onMirrorAudioStop = { audioStopped = true },
+        onMirrorVideoStop = { videoStopped = true }
     )
+
+    /** Binary-plist TEARDOWN body naming the given stream types, e.g. `{streams:[{type:96}]}`. */
+    private fun teardownBody(vararg streamTypes: Int): ByteArray =
+        PlistCodec.encode(mapOf("streams" to streamTypes.map { mapOf("type" to it.toLong()) }))
+
+    private fun teardownRequest(bytes: ByteArray) =
+        RtspRequest(method = "TEARDOWN", uri = "", headers = emptyMap(), body = "", bodyBytes = bytes)
 
     companion object {
         // Minimal valid SDP with H.264 video + AAC-ELD audio (base64 SPS/PPS included)
@@ -321,14 +385,22 @@ class TestableRtspHandler(
     onStreamingStarted: (SessionDescription) -> Unit,
     onStreamingStopped: () -> Unit,
     onPhotoReceived: (ByteArray, PhotoImageType) -> Unit = { _, _ -> },
-    onPhotoCleared: () -> Unit = {}
+    onPhotoCleared: () -> Unit = {},
+    onMirrorAudioStop: () -> Unit = {},
+    onMirrorVideoStop: () -> Unit = {}
 ) : RtspHandler(
+    context = io.mockk.mockk(relaxed = true),
     videoSurfaceProvider = { null },
     onStreamingStarted = onStreamingStarted,
     onStreamingStopped = onStreamingStopped,
     onPhotoReceived = onPhotoReceived,
-    onPhotoCleared = onPhotoCleared
+    onPhotoCleared = onPhotoCleared,
+    onMirrorAudioStop = onMirrorAudioStop,
+    onMirrorVideoStop = onMirrorVideoStop
 ) {
+    /** Test seam: mark mirror streams active without driving the full FairPlay SETUP handshake. */
+    fun seedActiveStreams(vararg types: Int) { activeStreamTypes.addAll(types.toList()) }
+
     fun handleOptionsPublic(req: RtspRequest) = handleOptionsInternal(req)
     fun handleAnnouncePublic(req: RtspRequest) = handleAnnounceInternal(req)
     fun handleSetupPublic(req: RtspRequest) = handleSetupInternal(req)

@@ -80,6 +80,10 @@ dependencies {
     // bcprov-jdk15on was renamed to bcprov-jdk18on starting with version 1.71
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
 
+    // ── dd-plist (binary plist encode/decode for the AirPlay 2 handshake) ──────
+    // PlistCodec (compiled here from app/src/main) imports com.dd.plist.*; on Maven Central.
+    implementation("com.googlecode.plist:dd-plist:1.28")
+
     // ── Timber 4.7.1 ───────────────────────────────────────────────────────────
     // timber-4.7.1 ships as an AAR on Maven Central; without AGP we can't unpack it.
     // Instead we reference the classes.jar extracted from that AAR directly.

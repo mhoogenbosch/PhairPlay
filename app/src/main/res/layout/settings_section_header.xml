@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Reusable section header for the Settings screen -->
+<!-- Reusable section header for the Settings screen.
+     NOTE: the root must NOT declare its own android:id. Each <include> of this
+     layout supplies its own id (header_display, header_protocols, ...); if the
+     root had an id, Android would ignore the include's id and every header would
+     collide on one id, so findViewById(R.id.header_*) would return null. -->
 <TextView
     xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/text_section_title"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginBottom="4dp"

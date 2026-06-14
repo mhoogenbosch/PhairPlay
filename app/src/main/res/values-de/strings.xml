@@ -65,8 +65,8 @@
     <string name="setting_miracast_subtitle">Verbindungen von Windows und Android akzeptieren</string>
     <string name="setting_cast_enabled">Google Cast-Empfänger</string>
     <string name="setting_cast_subtitle">Verbindungen von Chrome und Android akzeptieren</string>
-    <string name="setting_airplay_pin">PIN für AirPlay erforderlich</string>
-    <string name="setting_airplay_pin_subtitle">4-stelligen Bestätigungscode auf dem Bildschirm anzeigen</string>
+    <string name="setting_mirror_audio">Spiegel-Audio</string>
+    <string name="setting_mirror_audio_subtitle">Den Ton des Macs beim Spiegeln wiedergeben</string>
     <string name="setting_start_on_boot">Beim Starten automatisch starten</string>
     <string name="setting_debug_overlay">Debug-Overlay</string>
     <string name="setting_debug_overlay_subtitle">FPS und Latenz auf dem Streaming-Bildschirm anzeigen</string>
