@@ -288,6 +288,10 @@ class PhairPlayService : Service() {
                     ProtocolState.DISABLED,
                     ProtocolState.ERROR       -> {
                         _activeConnection.value = null
+                        // Withdraw the full-screen "incoming connection" notification so it
+                        // can't linger (or fire late) after the session already ended.
+                        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                            .cancel(NOTIFICATION_ID_INCOMING)
                         updateNotification(isRunning = state != ProtocolState.DISABLED &&
                                                        state != ProtocolState.ERROR)
                     }
@@ -366,6 +370,9 @@ class PhairPlayService : Service() {
             this, 99,
             Intent(this, MainActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                // Tells MainActivity it was opened for this session, so it can politely step
+                // aside (back to the previous app) again once the session ends.
+                putExtra(EXTRA_AUTO_OPENED, true)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -459,6 +466,8 @@ class PhairPlayService : Service() {
         const val CHANNEL_ID_INCOMING = "phairplay_incoming_channel"
         const val NOTIFICATION_ID = 1001
         const val NOTIFICATION_ID_INCOMING = 1002
+        /** Intent extra marking that MainActivity was auto-opened for an incoming session. */
+        const val EXTRA_AUTO_OPENED = "com.phairplay.extra.AUTO_OPENED_FOR_SESSION"
         const val ACTION_START    = "com.phairplay.action.START"
         const val ACTION_STOP     = "com.phairplay.action.STOP"
         const val ACTION_RESTART  = "com.phairplay.action.RESTART"

@@ -29,6 +29,10 @@ the foreground, which the receiver-appliance lifecycle no longer guarantees.
   no more black screen when mirroring starts while the app is closed. Ported from
   [JObersi10/PhairPlay](https://github.com/JObersi10/PhairPlay). Adds the
   `USE_FULL_SCREEN_INTENT` permission.
+- **…and steps aside again when the session ends.** An auto-opened Activity moves its task
+  to the back on disconnect, so the TV returns to whatever app was visible before the
+  session (or the launcher when there was none). A manually opened app never auto-hides,
+  and the "incoming connection" notification is withdrawn on disconnect.
 - **Diagnostics: unknown mirror payload types are hexdumped once per session** (first 16
   header bytes + first 32 payload bytes). iOS 26 sends a steady ~25 KB "payload type 5"
   every second that no open-source receiver documents; this collects material to analyse it.
