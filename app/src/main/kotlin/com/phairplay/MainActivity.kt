@@ -71,6 +71,14 @@ class MainActivity : AppCompatActivity() {
     private var currentNowPlaying: NowPlayingInfo? = null
     private var currentPin: String? = null
 
+    // True when the service auto-opened this Activity for an incoming session (full-screen
+    // intent). When that session ends we step aside again via moveTaskToBack(), so the TV
+    // returns to whatever the user was watching (or the launcher if nothing was). A manual
+    // app launch (no extra) never auto-hides. [sessionSeen] prevents backing out before the
+    // session was ever observed (e.g. the sender disconnected while the Activity was starting).
+    private var autoOpenedForSession = false
+    private var sessionSeen = false
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = (binder as? PhairPlayService.LocalBinder)?.getService()
@@ -108,11 +116,24 @@ class MainActivity : AppCompatActivity() {
             navigateTo(HomeFragment(), navItemHome)
         }
 
+        autoOpenedForSession =
+            intent?.getBooleanExtra(PhairPlayService.EXTRA_AUTO_OPENED, false) == true
+
         // Start the service immediately so it's running before any sender discovers us
         ServiceController.start(this)
 
         // Android 13+ requires an explicit runtime grant for POST_NOTIFICATIONS
         requestNotificationPermission()
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        // REORDER_TO_FRONT delivers the full-screen intent here when the Activity already
+        // exists (e.g. it was moved to the back after a previous session).
+        if (intent?.getBooleanExtra(PhairPlayService.EXTRA_AUTO_OPENED, false) == true) {
+            autoOpenedForSession = true
+            sessionSeen = false
+        }
     }
 
     override fun onStart() {
@@ -377,6 +398,19 @@ class MainActivity : AppCompatActivity() {
             currentAirPlayState == ProtocolState.CONNECTED -> showStreamingScreen()
             photoFrame != null -> showPhotoScreen(photoFrame)
             else -> hideStreamingScreen()
+        }
+
+        val sessionActive = pin != null || nowPlaying != null || photoFrame != null ||
+                currentAirPlayState == ProtocolState.CONNECTED
+        if (sessionActive) {
+            sessionSeen = true
+        } else if (autoOpenedForSession && sessionSeen) {
+            // Auto-opened for a session that has now ended: step aside so the TV returns to
+            // the previously visible app (or the launcher when there is none).
+            autoOpenedForSession = false
+            sessionSeen = false
+            Timber.d("Session ended — auto-opened Activity moves to back")
+            moveTaskToBack(true)
         }
     }
 
