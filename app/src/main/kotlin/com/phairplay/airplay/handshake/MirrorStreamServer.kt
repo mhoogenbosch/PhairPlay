@@ -63,6 +63,9 @@ class MirrorStreamServer(
     // frames until the next keyframe (IDR) so it never decodes a reference-broken, corrupt stream.
     @Volatile private var awaitingKeyframe = false
 
+    // Unknown payload types we already hexdumped this session (first occurrence only).
+    private val dumpedPayloadTypes = mutableSetOf<Int>()
+
     /** The OS-assigned TCP port macOS should connect to (returned in the SETUP response). */
     val dataPort: Int get() = serverSocket.localPort
 
@@ -106,7 +109,18 @@ class MirrorStreamServer(
                         if (annexB.isNotEmpty()) enqueue(Frame(annexB))
                     }
                     1 -> parseConfig(payload)?.let { enqueue(it) }
-                    else -> Logger.v("Mirror: ignoring payload type $payloadType ($payloadSize B)")
+                    else -> {
+                        // Unknown types are ignored, but hexdump the first occurrence per type per
+                        // session: iOS 26 sends a steady ~25KB payload type 5 whose meaning is
+                        // still unidentified — this gives us material to analyse it offline.
+                        if (dumpedPayloadTypes.add(payloadType)) {
+                            val hdr = header.take(16).joinToString(" ") { "%02x".format(it) }
+                            val head = payload.take(32).joinToString(" ") { "%02x".format(it) }
+                            Logger.i("Mirror: first payload type $payloadType ($payloadSize B) header16=$hdr head32=$head")
+                        } else {
+                            Logger.v("Mirror: ignoring payload type $payloadType ($payloadSize B)")
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
