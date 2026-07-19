@@ -24,6 +24,8 @@
 
     <!-- Network permissions — local LAN only, no internet required -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Full-screen intent: brings the app (video Surface) to the front when a sender connects -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -113,7 +115,8 @@
         <service
             android:name=".service.PhairPlayService"
             android:foregroundServiceType="connectedDevice"
-            android:exported="false" />
+            android:exported="false"
+            android:stopWithTask="false" />
 
         <!--
             BootReceiver — listens for BOOT_COMPLETED and starts PhairPlayService

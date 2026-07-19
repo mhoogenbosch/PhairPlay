@@ -130,6 +130,10 @@ class AirPlayReceiver(
     // The now-playing card shows only when audio plays WITHOUT video. We track both stream kinds
     // plus the latest DMAP metadata/artwork and recompute on every change (see [emitNowPlaying]).
     @Volatile private var audioPlaying = false
+    // TEARDOWN of the last stream and the subsequent socket close both call onStreamingStopped;
+    // without this guard the mDNS restart runs twice concurrently, and the second restart races
+    // the first one's fresh registration — escalating the advertised name to "(3)"/"(4)".
+    @Volatile private var streamingStopped = false
     @Volatile private var videoPlaying = false
     @Volatile private var npSenderName = "AirPlay"
     @Volatile private var npTitle: String? = null
@@ -262,6 +266,7 @@ class AirPlayReceiver(
      * - audio-only:   only [AudioPlayer], app stays on HomeScreen
      */
     private fun onStreamingStarted(session: SessionDescription) {
+        streamingStopped = false
         Logger.i("Streaming started — video=${session.hasVideo} audio=${session.hasAudio} " +
                  "audioOnly=${session.isAudioOnly}")
 
@@ -293,6 +298,8 @@ class AirPlayReceiver(
      * in sender pickers immediately.
      */
     private fun onStreamingStopped() {
+        if (streamingStopped) return
+        streamingStopped = true
         Logger.i("Streaming stopped — releasing media components")
         releaseMediaComponents()
         emitState(ProtocolState.ADVERTISING)

@@ -15,6 +15,34 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.2] - 2026-07-19
+
+The release that makes **iOS 26 screen mirroring actually visible on the TV**. With
+v1.1.0-mh.1's fixes the full mirror session already worked (verified: H.264 video decoded
+at ~60 fps), but video only renders when the app's Activity — and thus its Surface — is in
+the foreground, which the receiver-appliance lifecycle no longer guarantees.
+
+### Added
+- **App comes to the foreground when a sender connects.** A high-importance full-screen
+  intent notification (new channel `phairplay_incoming_channel`) starts `MainActivity`
+  when the AirPlay state hits CONNECTED, so the video Surface exists before frames arrive —
+  no more black screen when mirroring starts while the app is closed. Ported from
+  [JObersi10/PhairPlay](https://github.com/JObersi10/PhairPlay). Adds the
+  `USE_FULL_SCREEN_INTENT` permission.
+- **Diagnostics: unknown mirror payload types are hexdumped once per session** (first 16
+  header bytes + first 32 payload bytes). iOS 26 sends a steady ~25 KB "payload type 5"
+  every second that no open-source receiver documents; this collects material to analyse it.
+
+### Fixed
+- **Double teardown escalated the mDNS name to "(3)/(4)".** TEARDOWN of the last stream and
+  the subsequent socket close both fired `onStreamingStopped`, running two concurrent mDNS
+  restarts that raced each other's fresh registration. A guard flag (ported from
+  JObersi10/PhairPlay) makes teardown idempotent.
+- `PhairPlayService` is marked `android:stopWithTask="false"`, matching the
+  receiver-appliance lifecycle introduced in mh.1.
+
+---
+
 ## [1.1.0-mh.1] - 2026-07-19
 
 Based on upstream `v1.0.0-beta.1`.
