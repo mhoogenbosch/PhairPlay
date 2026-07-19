@@ -3,6 +3,8 @@ package com.phairplay.airplay
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.os.Handler
+import android.os.Looper
 import com.phairplay.service.ProtocolState
 import com.phairplay.util.Logger
 import com.phairplay.util.NetworkUtils
@@ -69,10 +71,25 @@ class MdnsService(
     @Volatile
     private var isStarted = false
 
-    // The name we requested to register — compared against the actual registered name
-    // in onServiceRegistered to detect mDNS collision auto-renaming.
+    // Used for delayed registration retries and the restart-timeout fallback.
+    private val handler = Handler(Looper.getMainLooper())
+
+    // Unregistration is asynchronous: these track in-flight unregisters so [restart] can
+    // wait for the old registrations to actually disappear before re-registering (otherwise
+    // we race our own stale registration and the name escalates to "(2)"/"(3)").
     @Volatile
-    private var requestedName: String = ""
+    private var pendingUnregistrations = 0
+    @Volatile
+    private var restartPending = false
+    @Volatile
+    private var restartDisplayName: String? = null
+    private var restartFallback: Runnable? = null
+
+    // Watchdog for the _airplay registration: when the requested name conflicts with another
+    // record on the SAME device (e.g. the TV's own Google Cast registration), MdnsAdvertiser
+    // can get stuck probing forever and never delivers ANY callback. Silence past the probe
+    // timeout is therefore treated as a name conflict.
+    private var airPlayWatchdog: Runnable? = null
 
     /**
      * Starts mDNS advertising.
@@ -95,7 +112,6 @@ class MdnsService(
 
         val effectiveName = resolveDisplayName(displayNameOverride)
         Logger.i("Starting mDNS advertising as '$effectiveName'")
-        requestedName = effectiveName
 
         registerAirPlayService(effectiveName)
         registerRaopService(effectiveName)
@@ -111,13 +127,19 @@ class MdnsService(
      */
     fun stop() {
         Logger.i("Stopping mDNS advertising")
+        var submitted = 0
         try {
-            airPlayListener?.let { nsdManager.unregisterService(it) }
-            raopListener?.let { nsdManager.unregisterService(it) }
+            airPlayListener?.let { nsdManager.unregisterService(it); submitted++ }
+            raopListener?.let { nsdManager.unregisterService(it); submitted++ }
         } catch (e: Exception) {
-            // Unregistration errors are non-fatal: service will expire via mDNS TTL
+            // Unregistration errors are non-fatal: service will expire via mDNS TTL.
+            // Don't count callbacks we may never get — a pending restart would stall on them
+            // (the conflict-retry in registration covers any leftover stale registration).
             Logger.e("Error unregistering mDNS services (non-fatal)", e)
+            submitted = 0
         } finally {
+            cancelAirPlayWatchdog()
+            pendingUnregistrations = submitted
             airPlayListener = null
             raopListener = null
             registeredCount = 0
@@ -132,12 +154,43 @@ class MdnsService(
      * Used after a streaming session ends to immediately re-advertise the device
      * in sender pickers.
      *
+     * Unregistration is asynchronous, so this waits for [NsdManager] to confirm both
+     * unregistrations (with a [RESTART_TIMEOUT_MS] fallback) before re-registering.
+     * Re-registering while the old registration is still live made NsdManager treat it
+     * as a conflict and escalate the name to "Name (2)"/"(3)" after every teardown.
+     *
      * @param displayNameOverride Updated display name, if changed in Settings.
      */
     fun restart(displayNameOverride: String? = null) {
         Logger.d("Restarting mDNS advertising")
+        restartDisplayName = displayNameOverride
+        restartPending = true
         stop()
-        start(displayNameOverride)
+        if (pendingUnregistrations <= 0) {
+            completeRestart("immediate")
+        } else {
+            restartFallback = Runnable { completeRestart("timeout") }.also {
+                handler.postDelayed(it, RESTART_TIMEOUT_MS)
+            }
+        }
+    }
+
+    /** Runs the deferred [restart] once unregistration completed (or timed out). */
+    @Synchronized
+    private fun completeRestart(reason: String) {
+        if (!restartPending) return
+        restartPending = false
+        restartFallback?.let { handler.removeCallbacks(it) }
+        restartFallback = null
+        Logger.d("mDNS restart proceeding ($reason)")
+        start(restartDisplayName)
+    }
+
+    /** Bookkeeping for [restart]: called from every unregistration callback. */
+    @Synchronized
+    private fun onUnregistrationDone() {
+        if (pendingUnregistrations > 0) pendingUnregistrations--
+        if (pendingUnregistrations == 0 && restartPending) completeRestart("unregistered")
     }
 
     // ─── Private helpers ─────────────────────────────────────────────────────
@@ -159,9 +212,10 @@ class MdnsService(
      *
      * @param displayName The name shown in sender AirPlay pickers.
      */
-    private fun registerAirPlayService(displayName: String) {
+    private fun registerAirPlayService(displayName: String, attempt: Int = 1) {
+        val attemptName = nameForAttempt(displayName, attempt)
         val serviceInfo = NsdServiceInfo().apply {
-            serviceName = displayName
+            serviceName = attemptName
             serviceType = SERVICE_TYPE_AIRPLAY
             port = AIRPLAY_PORT
 
@@ -175,20 +229,49 @@ class MdnsService(
             setAttribute("flags", "0x4")                        // Screen-mirroring receiver
         }
 
-        airPlayListener = createRegistrationListener(
+        val listener = createRegistrationListener(
             serviceLabel = "_airplay._tcp",
             onRegisteredName = { actualName ->
                 // Detect collision auto-renaming: NsdManager appended " (2)", " (3)", etc.
-                if (actualName != requestedName) {
-                    Logger.w("mDNS name collision detected: requested='$requestedName' " +
+                if (actualName != attemptName) {
+                    Logger.w("mDNS name collision detected: requested='$attemptName' " +
                              "actual='$actualName' — NsdManager resolved automatically")
                 }
                 onActualNameRegistered(actualName)
             },
-            onSuccess = { incrementAndCheckBothRegistered() },
-            onFailure = { onStateChange(ProtocolState.ERROR) }
+            onSuccess = {
+                cancelAirPlayWatchdog()
+                incrementAndCheckBothRegistered()
+            },
+            onFailure = { errorCode ->
+                cancelAirPlayWatchdog()
+                retryOrFail(serviceLabel = "_airplay._tcp", errorCode = errorCode, attempt = attempt) {
+                    registerAirPlayService(displayName, attempt + 1)
+                }
+            }
         )
-        nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, airPlayListener!!)
+        airPlayListener = listener
+        nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, listener)
+
+        // No callback at all within the timeout = probing stuck on a conflict → cancel the
+        // pending registration and retry with a suffixed name (see field docs on the watchdog).
+        cancelAirPlayWatchdog()
+        airPlayWatchdog = Runnable {
+            airPlayWatchdog = null
+            if (isStarted && airPlayListener === listener) {
+                Logger.w("_airplay._tcp '$attemptName' got no registration callback in " +
+                         "${PROBE_TIMEOUT_MS}ms — probing stuck, treating as name conflict")
+                runCatching { nsdManager.unregisterService(listener) }
+                retryOrFail(serviceLabel = "_airplay._tcp", errorCode = -1, attempt = attempt) {
+                    registerAirPlayService(displayName, attempt + 1)
+                }
+            }
+        }.also { handler.postDelayed(it, PROBE_TIMEOUT_MS) }
+    }
+
+    private fun cancelAirPlayWatchdog() {
+        airPlayWatchdog?.let { handler.removeCallbacks(it) }
+        airPlayWatchdog = null
     }
 
     /**
@@ -203,11 +286,11 @@ class MdnsService(
      *
      * @param displayName The device name portion of the RAOP service name.
      */
-    private fun registerRaopService(displayName: String) {
+    private fun registerRaopService(displayName: String, attempt: Int = 1) {
         val macHex = NetworkUtils.getMacAddress().replace(":", "").uppercase()
 
         val serviceInfo = NsdServiceInfo().apply {
-            serviceName = "$macHex@$displayName"  // required RAOP format
+            serviceName = "$macHex@${nameForAttempt(displayName, attempt)}"  // required RAOP format
             serviceType = SERVICE_TYPE_RAOP
             port = AIRPLAY_PORT
 
@@ -226,10 +309,39 @@ class MdnsService(
             serviceLabel = "_raop._tcp",
             onRegisteredName = null,  // RAOP name has MAC prefix — not shown to users
             onSuccess = { incrementAndCheckBothRegistered() },
-            onFailure = { onStateChange(ProtocolState.ERROR) }
+            onFailure = { errorCode ->
+                retryOrFail(serviceLabel = "_raop._tcp", errorCode = errorCode, attempt = attempt) {
+                    registerRaopService(displayName, attempt + 1)
+                }
+            }
         )
         nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, raopListener!!)
     }
+
+    /**
+     * Retry policy for failed registrations.
+     *
+     * Newer Android versions do NOT auto-rename on an mDNS name conflict (despite what
+     * NsdManager's docs suggest): NsdService throws a NameConflictException, which surfaces
+     * here as a plain registration failure. Seen in the wild on Google TV, where the
+     * system device name ("Nokia Streaming Box 8010") is already taken by the device's own
+     * Google Cast registration. So we resolve conflicts ourselves: retry with a numbered
+     * suffix — "Name (2)", "Name (3)" — up to [MAX_NAME_ATTEMPTS], then give up with ERROR.
+     */
+    private fun retryOrFail(serviceLabel: String, errorCode: Int, attempt: Int, retry: () -> Unit) {
+        if (attempt < MAX_NAME_ATTEMPTS && isStarted) {
+            Logger.w("mDNS $serviceLabel registration failed (errorCode=$errorCode) — " +
+                     "retrying with suffixed name (attempt ${attempt + 1}/$MAX_NAME_ATTEMPTS)")
+            handler.postDelayed({ if (isStarted) retry() }, RETRY_DELAY_MS)
+        } else {
+            isStarted = false
+            onStateChange(ProtocolState.ERROR)
+        }
+    }
+
+    /** "Name" for the first attempt, "Name (2)", "Name (3)" for conflict retries. */
+    private fun nameForAttempt(base: String, attempt: Int): String =
+        if (attempt <= 1) base else "$base ($attempt)"
 
     /**
      * Emits [ProtocolState.ADVERTISING] only after both services have confirmed registration.
@@ -257,7 +369,7 @@ class MdnsService(
         serviceLabel: String,
         onRegisteredName: ((String) -> Unit)?,
         onSuccess: () -> Unit,
-        onFailure: () -> Unit
+        onFailure: (errorCode: Int) -> Unit
     ): NsdManager.RegistrationListener {
         return object : NsdManager.RegistrationListener {
 
@@ -273,24 +385,26 @@ class MdnsService(
                 // Error codes from NsdManager:
                 //   FAILURE_ALREADY_ACTIVE (3) — already registered; treat as success
                 //   FAILURE_MAX_LIMIT (4)      — too many services (should not happen)
-                //   FAILURE_INTERNAL_ERROR (0) — system mDNS daemon issue
+                //   FAILURE_INTERNAL_ERROR (0) — system mDNS daemon issue, including
+                //     NameConflictException on newer Android (see [retryOrFail])
                 if (errorCode == NsdManager.FAILURE_ALREADY_ACTIVE) {
                     Logger.w("mDNS $serviceLabel already active — treating as success")
                     onSuccess()
                 } else {
                     Logger.e("mDNS registration FAILED for $serviceLabel, errorCode=$errorCode")
-                    isStarted = false
-                    onFailure()
+                    onFailure(errorCode)
                 }
             }
 
             override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
                 Logger.d("mDNS unregistered: $serviceLabel")
+                onUnregistrationDone()
             }
 
             override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
                 // Non-fatal: the service will expire via mDNS TTL (~4500ms by default)
                 Logger.w("mDNS unregistration failed for $serviceLabel, errorCode=$errorCode (non-fatal)")
+                onUnregistrationDone()
             }
         }
     }
@@ -304,6 +418,22 @@ class MdnsService(
 
         /** AirPlay RTSP port — [RtspHandler] must listen on this port. */
         const val AIRPLAY_PORT = 7000
+
+        /** Total registration attempts per service before giving up (1 + 2 suffix retries). */
+        private const val MAX_NAME_ATTEMPTS = 3
+
+        /** Delay before a conflict-retry registration attempt. */
+        private const val RETRY_DELAY_MS = 300L
+
+        /** How long [restart] waits for unregistration callbacks before proceeding anyway. */
+        private const val RESTART_TIMEOUT_MS = 2000L
+
+        /**
+         * How long a registration may stay silent (no success/failure callback) before the
+         * watchdog treats it as a stuck probe. mDNS probing normally completes in <1s
+         * (3 probes × 250ms); 5s leaves ample margin on a busy network.
+         */
+        private const val PROBE_TIMEOUT_MS = 5000L
 
         /**
          * AirPlay feature bitmask: advertise screen mirroring, video, and audio support.
