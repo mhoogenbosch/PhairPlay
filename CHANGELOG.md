@@ -5,9 +5,56 @@ All notable changes to PhairPlay will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+This fork ([mhoogenbosch/PhairPlay](https://github.com/mhoogenbosch/PhairPlay)) versions
+its releases as `<semver>-mh.<n>` on top of the upstream
+([mazer666/PhairPlay](https://github.com/mazer666/PhairPlay)) baseline.
+
 ---
 
 ## [Unreleased]
+
+---
+
+## [1.1.0-mh.1] - 2026-07-19
+
+Based on upstream `v1.0.0-beta.1`.
+
+### Fixed
+- **mDNS name conflict left `_airplay._tcp` unregistered forever.** When the requested
+  service name collides with another record on the same device (e.g. the TV's own Google
+  Cast registration under the system device name), newer Android versions do not
+  auto-rename: `MdnsAdvertiser` gets stuck probing and never delivers *any* callback, so
+  the device never appears in AirPlay pickers. `MdnsService` now runs a 5-second watchdog
+  per registration attempt and retries with a numbered suffix ("Name (2)", "Name (3)",
+  max 3 attempts) on both an explicit registration failure and a silent stuck probe.
+  Verified on a Nokia Streaming Box 8010 (Google TV), which conflicts with its own
+  Google Cast record: now advertises as "Nokia Streaming Box 8010 (2)".
+- **mDNS restart race escalated the name to "(2)/(3)" after every session.**
+  `MdnsService.restart()` re-registered while the previous (asynchronous) unregistration
+  was still in flight, conflicting with its own stale registration. `restart()` now waits
+  for both unregistration callbacks (2-second timeout fallback) before re-registering.
+- **RTSP message limit rejected the iOS mirror-stream SETUP.** The 64 KB
+  `MAX_MESSAGE_BYTES` cap was smaller than the ~77 KB binary-plist SETUP that iOS 26
+  senders emit for the mirror stream, so the sender tore the session down right after
+  audio started. Raised to 1 MB (also submitted upstream as
+  [mazer666/PhairPlay#11](https://github.com/mazer666/PhairPlay/pull/11)).
+
+### Changed
+- **Receiver-appliance lifecycle: the receiver keeps running when the UI goes away.**
+  Backing out of the app (`MainActivity` finishing) and swiping it from recents
+  (`onTaskRemoved`) no longer stop the foreground service, so the TV stays visible in
+  AirPlay pickers — matching how a dedicated receiver box behaves. Stopping the receiver
+  is now an explicit act via the in-app protocol toggles.
+
+### Added
+- **On-device diagnostics** (ported from
+  [JObersi10/PhairPlay](https://github.com/JObersi10/PhairPlay), trimmed):
+  - `LogBuffer` — 500-line in-memory ring buffer plus a persistent `files/phairplay.log`
+    (capped at 1000 lines) and an uncaught-exception hook, so crash logs survive process
+    death. The Timber tree is planted in **all** builds; release sideloads are now
+    debuggable without adb.
+  - `DiagnosticServer` — plain-HTTP log access on the LAN: full dump on port **8001**,
+    live streaming tail on port **8002** (`curl http://<tv-ip>:8002`).
 
 ---
 
