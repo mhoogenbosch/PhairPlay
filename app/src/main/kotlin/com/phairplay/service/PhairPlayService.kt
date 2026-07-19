@@ -19,6 +19,7 @@ import com.phairplay.cast.CastReceiver
 import com.phairplay.miracast.MiracastReceiver
 import com.phairplay.settings.AppSettings
 import com.phairplay.settings.SettingsRepository
+import com.phairplay.diagnostic.DiagnosticServer
 import com.phairplay.util.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -105,6 +106,7 @@ class PhairPlayService : Service() {
         Logger.i("PhairPlayService created")
         settingsRepository = SettingsRepository(applicationContext)
         createNotificationChannel()
+        DiagnosticServer.start(serviceScope)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -164,6 +166,7 @@ class PhairPlayService : Service() {
     override fun onDestroy() {
         Logger.i("PhairPlayService destroying")
         stopAllReceiversInternal()
+        DiagnosticServer.stop()
         serviceJob.cancel()
         super.onDestroy()
     }

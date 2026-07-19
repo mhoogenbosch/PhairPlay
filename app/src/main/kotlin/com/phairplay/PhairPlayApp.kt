@@ -1,6 +1,7 @@
 package com.phairplay
 
 import android.app.Application
+import com.phairplay.diagnostic.LogBuffer
 import timber.log.Timber
 
 /**
@@ -35,11 +36,20 @@ class PhairPlayApp : Application() {
      * - The ability to swap the log backend (useful for crash reporting in future)
      */
     private fun initLogging() {
+        LogBuffer.init(filesDir)
         if (BuildConfig.DEBUG) {
             // Debug tree: logs everything, shows file names and line numbers
             Timber.plant(Timber.DebugTree())
         }
-        // In release builds, we deliberately plant no tree to avoid
-        // exposing debug information. Critical errors use android.util.Log directly.
+        // The LogBuffer tree is planted in ALL builds (debug + release): the buffer stays
+        // on-device and is only reachable over the LAN diagnostic ports, so a sideloaded
+        // release build stays debuggable without adb/logcat access.
+        Timber.plant(LogBuffer.Tree())
+
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            LogBuffer.add("[CRASH/${thread.name}] UNCAUGHT: ${throwable.javaClass.name}: ${throwable.message}\n${throwable.stackTraceToString()}")
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
     }
 }
