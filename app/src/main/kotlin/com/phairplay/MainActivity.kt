@@ -134,17 +134,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // A user-initiated exit (Back out of the app) should end any active mirror — closing the
-        // service stops the receiver, which drops the RTSP connection so the sender stops mirroring
-        // too. isFinishing distinguishes a real exit from a config-change recreation (where the
-        // service must keep running). Backgrounding via Home goes through onStop only (no destroy),
-        // so the receiver keeps advertising for a quick return.
-        if (isFinishing) {
-            Timber.d("MainActivity finishing — stopping service so mirroring doesn't linger")
-            ServiceController.stop(this)
-        } else {
-            Timber.d("MainActivity destroyed (recreation) — leaving service running")
-        }
+        // Receiver-appliance behaviour: leaving the app (Back) only closes the UI — the foreground
+        // service keeps running so the TV stays visible in AirPlay pickers, like a dedicated
+        // receiver box. Stopping the receiver is an explicit act via the in-app protocol toggles.
+        Timber.d("MainActivity destroyed — leaving service running (receiver keeps advertising)")
     }
 
     // ─── View Setup ──────────────────────────────────────────────────────────

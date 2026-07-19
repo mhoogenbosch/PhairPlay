@@ -127,14 +127,12 @@ class PhairPlayService : Service() {
     override fun onBind(intent: Intent?): IBinder = binder
 
     /**
-     * The app was swiped away from recents. Cleanly stop all receivers (which closes the RTSP
-     * connection so an active mirror ends on the sender too) and stop the service — don't let
-     * START_STICKY silently resurrect it as a zombie that keeps advertising/streaming invisibly.
+     * The app was swiped away from recents. Keep the service (and receivers) running: this is
+     * a receiver appliance — swiping the app away shouldn't make the TV vanish from AirPlay
+     * pickers. The foreground notification keeps the running state visible to the user.
      */
     override fun onTaskRemoved(rootIntent: Intent?) {
-        Logger.i("App task removed — stopping receivers + service")
-        stopReceivers()
-        stopSelf()
+        Logger.i("App task removed — service continues in background")
         super.onTaskRemoved(rootIntent)
     }
 
