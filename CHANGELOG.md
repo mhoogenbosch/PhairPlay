@@ -28,6 +28,13 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ### Added
 - `SYSTEM_ALERT_WINDOW` permission (draw over other apps) — see above.
+- **Headless display-name setter for scripted fleet rollout.** A new exported
+  `DisplayNameReceiver` sets the advertised device name over adb without touching the on-screen
+  Settings UI:
+  `am broadcast -n <pkg>/.service.DisplayNameReceiver -a com.phairplay.action.SET_DISPLAY_NAME --es name "Woonkamer-TV"`.
+  The receiver only persists the name; the running service now **observes** the setting and
+  re-registers mDNS live, so the rename also takes effect immediately for an in-app change and never
+  needs a manual restart. A blank name clears the override (falls back to the Android device name).
 
 ---
 
