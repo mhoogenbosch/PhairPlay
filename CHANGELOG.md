@@ -13,6 +13,12 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+---
+
+## [1.1.0-mh.4] - 2026-07-20
+
+Appliance polish ahead of the multi-TV rollout, plus fork documentation.
+
 ### Fixed
 - **The app steps aside after a session even when it was already foregrounded at connect.**
   `moveTaskToBack` on session end depended on a flag set only from the `EXTRA_AUTO_OPENED` intent, but
@@ -26,6 +32,10 @@ its releases as `<semver>-mh.<n>` on top of the upstream
   Wi-Fi Direct permission isn't granted on Google TV / Fire TV (it always errored), and the devices
   have Chromecast built in so PhairPlay's Cast receiver is redundant; a receiver appliance should
   also advertise again after a reboot. Applies to fresh installs; existing installs keep their values.
+
+### Docs
+- README gained an "About this fork" section: personal fork for home use only (no support/warranty),
+  the fork's feature list, and a note on why YouTube can't be screen-mirrored.
 
 ---
 
