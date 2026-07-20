@@ -20,7 +20,8 @@
     - READ/WRITE storage (we don't persist stream data)
     - CAMERA            (not needed)
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Network permissions — local LAN only, no internet required -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -148,7 +149,14 @@
         -->
         <receiver
             android:name=".service.DisplayNameReceiver"
-            android:exported="true">
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <!--
+                Intentionally exported without a permission: it must be reachable from adb/am
+                (shell uid, which can't hold a custom permission), and its only effect is renaming
+                this receiver device — benign on an appliance. Lint's ExportedReceiver check is
+                suppressed for exactly this element.
+            -->
             <intent-filter>
                 <action android:name="com.phairplay.action.SET_DISPLAY_NAME" />
             </intent-filter>
