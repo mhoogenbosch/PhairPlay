@@ -21,6 +21,7 @@ import com.phairplay.service.Protocol
 import com.phairplay.service.ProtocolState
 import com.phairplay.service.ServiceController
 import com.phairplay.service.ServiceState
+import com.phairplay.settings.SettingsRepository
 import com.phairplay.util.Logger
 import com.phairplay.util.NetworkUtils
 import kotlinx.coroutines.flow.collectLatest
@@ -145,12 +146,21 @@ class HomeFragment : Fragment() {
     }
 
     /**
-     * Shows the device's AirPlay name on the HomeScreen so the user knows
-     * what to look for in their sender's picker.
+     * Shows the device's AirPlay name on the HomeScreen so the user knows what to look for in their
+     * sender's picker. Shows the configured display name (what is actually advertised), falling back
+     * to the system device name only when no custom name is set. Observes settings so a rename (in-app
+     * or via DisplayNameReceiver) updates the label live.
      */
     private fun showDeviceName() {
-        val name = NetworkUtils.getDeviceName(requireContext())
-        textDeviceName.text = getString(R.string.home_device_visible_as, name)
+        val repo = SettingsRepository(requireContext().applicationContext)
+        viewLifecycleOwner.lifecycleScope.launch {
+            repo.settingsFlow.collectLatest { settings ->
+                val name = settings.effectiveDisplayName.ifEmpty {
+                    NetworkUtils.getDeviceName(requireContext())
+                }
+                textDeviceName.text = getString(R.string.home_device_visible_as, name)
+            }
+        }
     }
 
     // ─── State Observation ───────────────────────────────────────────────────
