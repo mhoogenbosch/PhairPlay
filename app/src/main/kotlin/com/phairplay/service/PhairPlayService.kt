@@ -29,7 +29,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -100,6 +102,12 @@ class PhairPlayService : Service() {
     // Settings — read once when starting, re-read on restart
     private lateinit var settingsRepository: SettingsRepository
 
+    // The display name currently applied to the live mDNS registration. Set by startReceivers();
+    // the settings observer compares against it so a rename (from the UI or DisplayNameReceiver /
+    // adb) re-registers mDNS live, and so it never restarts on the name it already advertises.
+    @Volatile
+    private var appliedDisplayName: String? = null
+
     // ─── Service Lifecycle ───────────────────────────────────────────────────
 
     override fun onCreate() {
@@ -108,6 +116,29 @@ class PhairPlayService : Service() {
         settingsRepository = SettingsRepository(applicationContext)
         createNotificationChannel()
         DiagnosticServer.start(serviceScope)
+        observeDisplayNameChanges()
+    }
+
+    /**
+     * Re-registers mDNS when the display name changes while running. Enables a live, headless
+     * rename (see [DisplayNameReceiver]) and makes an in-app rename take effect without a manual
+     * restart. Only fires once a name has actually been applied ([appliedDisplayName] non-null) and
+     * the value truly changed, so it can't loop on its own restart.
+     */
+    private fun observeDisplayNameChanges() {
+        serviceScope.launch {
+            settingsRepository.settingsFlow
+                .map { it.effectiveDisplayName }
+                .distinctUntilChanged()
+                .collect { name ->
+                    if (appliedDisplayName != null && name != appliedDisplayName &&
+                        _serviceState.value == ServiceState.Running) {
+                        Logger.i("Display name changed to '${name.ifEmpty { "<system name>" }}' " +
+                                 "— restarting receivers to re-register mDNS")
+                        restartReceivers()
+                    }
+                }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -180,6 +211,7 @@ class PhairPlayService : Service() {
      */
     private suspend fun startReceivers() {
         val settings = settingsRepository.settingsFlow.first()
+        appliedDisplayName = settings.effectiveDisplayName   // baseline for the rename observer
         Logger.i("Starting receivers: AirPlay=${settings.airPlayEnabled}, Miracast=${settings.miracastEnabled}, Cast=${settings.castEnabled}")
 
         _serviceState.value = ServiceState.Running
@@ -214,6 +246,7 @@ class PhairPlayService : Service() {
         kotlinx.coroutines.delay(500) // brief pause to ensure ports are released
         startReceivers()
     }
+
 
     // ─── Individual Protocol Starters ────────────────────────────────────────
 
@@ -493,6 +526,10 @@ class PhairPlayService : Service() {
         const val ACTION_START    = "com.phairplay.action.START"
         const val ACTION_STOP     = "com.phairplay.action.STOP"
         const val ACTION_RESTART  = "com.phairplay.action.RESTART"
+        /** Sets the advertised display name headlessly (adb rollout). Reads the [EXTRA_DISPLAY_NAME] extra. */
+        const val ACTION_SET_DISPLAY_NAME = "com.phairplay.action.SET_DISPLAY_NAME"
+        /** String extra for [ACTION_SET_DISPLAY_NAME]. `--es name "..."` on the adb command line. */
+        const val EXTRA_DISPLAY_NAME = "name"
     }
 }
 

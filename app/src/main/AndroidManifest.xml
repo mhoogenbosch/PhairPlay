@@ -140,6 +140,20 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            DisplayNameReceiver: sets the advertised display name headlessly for a scripted
+            fleet rollout. exported="true" so adb/am (shell uid) can reach it via an
+            "am broadcast" to this component with action SET_DISPLAY_NAME and a "name" string
+            extra. Its only effect is renaming this receiver device (benign on an appliance).
+        -->
+        <receiver
+            android:name=".service.DisplayNameReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.phairplay.action.SET_DISPLAY_NAME" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>
