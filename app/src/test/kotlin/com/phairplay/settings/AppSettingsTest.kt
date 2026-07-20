@@ -29,10 +29,12 @@ class AppSettingsTest {
     }
 
     @Test
-    fun `default settings have all protocols enabled`() {
+    fun `default settings enable AirPlay only`() {
+        // These are Google TV / Fire TV receivers: Miracast lacks the Wi-Fi Direct permission and
+        // errors, and Cast is redundant next to built-in Chromecast — so both default off.
         assertTrue(AppSettings.DEFAULT.airPlayEnabled)
-        assertTrue(AppSettings.DEFAULT.miracastEnabled)
-        assertTrue(AppSettings.DEFAULT.castEnabled)
+        assertFalse(AppSettings.DEFAULT.miracastEnabled)
+        assertFalse(AppSettings.DEFAULT.castEnabled)
     }
 
     @Test
@@ -41,8 +43,9 @@ class AppSettingsTest {
     }
 
     @Test
-    fun `default settings have start on boot disabled`() {
-        assertFalse(AppSettings.DEFAULT.startOnBoot)
+    fun `default settings have start on boot enabled`() {
+        // Receiver appliance: it should advertise again after a reboot without anyone opening the app.
+        assertTrue(AppSettings.DEFAULT.startOnBoot)
     }
 
     @Test

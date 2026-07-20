@@ -42,6 +42,9 @@ sourceSets {
                 "**/settings/SettingsRepository.kt",
                 "**/service/PhairPlayService.kt",
                 "**/service/BootReceiver.kt",
+                // DisplayNameReceiver uses SettingsRepository (DataStore) + PhairPlayService — both
+                // excluded here — so it can't compile in the JVM test-runner and isn't under test.
+                "**/service/DisplayNameReceiver.kt",
                 "**/MainActivityTest.kt",
                 // MdnsServiceTest mocks NsdManager whose static initializer calls
                 // VMRuntime.newUnpaddedArray (JNI) — not available in the JVM.
