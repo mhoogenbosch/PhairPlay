@@ -13,6 +13,12 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+---
+
+## [1.1.0-mh.5] - 2026-07-20
+
+Makes the mh.4 receiver defaults actually take effect at runtime, and gets CI green.
+
 ### Fixed
 - **The mh.4 default-receiver change now actually takes effect.** `SettingsRepository.toAppSettings()`
   had its own hardcoded fallbacks (`?: true`/`?: false`) for unset preference keys, which silently
