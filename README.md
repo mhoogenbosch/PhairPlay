@@ -16,6 +16,39 @@ PhairPlay is a free, open-source, ad-free AirPlay 2 receiver for Android TV and 
 
 ---
 
+## About this fork
+
+This is a **personal fork** ([mhoogenbosch/PhairPlay](https://github.com/mhoogenbosch/PhairPlay)) of
+[mazer666/PhairPlay](https://github.com/mazer666/PhairPlay), which I rebuilt **for my own home use
+only**. It is not an official build, carries no support or warranty, and is tailored to my own
+devices (a Nokia Streaming Box 8010 and a few Fire TV sticks) — your mileage may vary. Releases are
+versioned `X.Y.Z-mh.N` and built locally (no CI).
+
+### What this fork adds / changes
+- **iOS 26 screen mirroring works** — fixes for the RTSP body-size limit, a watchdog for the
+  `_airplay` mDNS name-conflict probe that could hang forever, and reliable rendering onto the video
+  Surface.
+- **Reliable foreground-on-connect** — the app is brought to the front the moment a sender connects
+  (direct `startActivity` via the draw-over-other-apps permission), so mirroring appears instantly
+  even from a closed app on an always-unlocked TV, where a full-screen-intent notification is ignored.
+- **Receiver-appliance lifecycle** — the app steps aside to the previous app / launcher when a
+  session ends, and otherwise keeps advertising quietly in the background.
+- **Unique AirPlay identity per install** — a stable per-device `deviceid` derived from a persistent
+  UUID, so several TVs on one LAN don't collide as a single receiver.
+- **Headless display-name setter** — set the advertised device name over `adb` (broadcast intent),
+  for scripted multi-device installs.
+- **On-device diagnostics** — an HTTP log dump (`:8001`) + live tail (`:8002`) and a persistent file
+  log, so a receiver can be debugged without `adb logcat`.
+- **Sensible defaults for these TVs** — Miracast and Cast off by default (Miracast lacks the Wi-Fi
+  Direct permission on Google TV / Fire TV and errors; Cast is redundant next to built-in
+  Chromecast), AirPlay on, start-on-boot on.
+
+> **Note:** YouTube (and similar apps) blank their own video layer while screen-mirroring as a DRM
+> measure — that's the app's choice, not something a receiver can override. Use the app's native
+> Cast button for those instead.
+
+---
+
 ## Current Status — v1.0.0-beta.1
 
 PhairPlay's AirPlay 2 receiver is fully implemented and available as a signed beta release. Download the APK directly from the [GitHub Releases page](https://github.com/mazer666/PhairPlay/releases).
