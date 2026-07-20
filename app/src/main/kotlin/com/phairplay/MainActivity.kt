@@ -79,6 +79,11 @@ class MainActivity : AppCompatActivity() {
     private var autoOpenedForSession = false
     private var sessionSeen = false
 
+    // True once the user actually touched the remote/UI during this foreground stint. Used to tell
+    // "the app is only up because a sender connected" (retreat when it ends) apart from "the user is
+    // actively using the app" (stay put). Reset each time the Activity goes to the background.
+    private var userInteractedThisForeground = false
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = (binder as? PhairPlayService.LocalBinder)?.getService()
@@ -145,12 +150,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        // Fresh foreground stint next time — forget any interaction from this one.
+        userInteractedThisForeground = false
         // Clear surface reference before unbinding to avoid holding a dead Surface
         service?.setVideoSurfaceProvider { null }
         if (isBound) {
             unbindService(serviceConnection)
             isBound = false
         }
+    }
+
+    /** Any real remote/touch input marks this foreground stint as user-driven (see [updateOverlay]). */
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        userInteractedThisForeground = true
     }
 
     override fun onDestroy() {
@@ -403,6 +416,13 @@ class MainActivity : AppCompatActivity() {
         val sessionActive = pin != null || nowPlaying != null || photoFrame != null ||
                 currentAirPlayState == ProtocolState.CONNECTED
         if (sessionActive) {
+            // Treat a session that starts while the user isn't actively using the app as
+            // opened-for-session, so we retreat when it ends. This covers the case the intent flag
+            // misses: the Activity was ALREADY foreground at connect (e.g. left open, or a prior
+            // session), so REORDER_TO_FRONT delivers no onNewIntent and never set the flag.
+            if (!sessionSeen && !userInteractedThisForeground) {
+                autoOpenedForSession = true
+            }
             sessionSeen = true
         } else if (autoOpenedForSession && sessionSeen) {
             // Auto-opened for a session that has now ended: step aside so the TV returns to

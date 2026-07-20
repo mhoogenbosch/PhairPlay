@@ -13,6 +13,20 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+### Fixed
+- **The app steps aside after a session even when it was already foregrounded at connect.**
+  `moveTaskToBack` on session end depended on a flag set only from the `EXTRA_AUTO_OPENED` intent, but
+  when the app is already at the front `FLAG_ACTIVITY_REORDER_TO_FRONT` delivers no `onNewIntent`, so
+  the app stayed on screen after the sender disconnected. Now a session that starts while the user
+  isn't actively using the app is treated as opened-for-session (retreat on end); real remote/touch
+  input marks the stint as user-driven so the app isn't yanked away from someone using it.
+
+### Changed
+- **Default receivers tuned for these TVs: Miracast off, Cast off, Start-on-boot on.** Miracast's
+  Wi-Fi Direct permission isn't granted on Google TV / Fire TV (it always errored), and the devices
+  have Chromecast built in so PhairPlay's Cast receiver is redundant; a receiver appliance should
+  also advertise again after a reboot. Applies to fresh installs; existing installs keep their values.
+
 ---
 
 ## [1.1.0-mh.3] - 2026-07-20
