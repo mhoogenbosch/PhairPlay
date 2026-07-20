@@ -13,6 +13,17 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+### Fixed
+- **The mh.4 default-receiver change now actually takes effect.** `SettingsRepository.toAppSettings()`
+  had its own hardcoded fallbacks (`?: true`/`?: false`) for unset preference keys, which silently
+  overrode the `AppSettings` data-class defaults — so on a fresh install Miracast/Cast were still on
+  and start-on-boot still off despite mh.4. Fallbacks now come from `AppSettings.DEFAULT` (one source
+  of truth), so the intended defaults (AirPlay-only, start-on-boot on) apply at runtime.
+- **CI green again.** Android Lint failed the build on `ExportedReceiver` for the new
+  `DisplayNameReceiver` (exported without a permission). It's intentionally exported (adb-reachable,
+  benign rename-only), so the check is suppressed on that element with `tools:ignore`. Also excluded
+  the receiver from the JVM test-runner and updated `AppSettingsTest` to the new defaults.
+
 ---
 
 ## [1.1.0-mh.4] - 2026-07-20

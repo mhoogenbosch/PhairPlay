@@ -104,17 +104,23 @@ class SettingsRepository(private val context: Context) {
      * Maps a raw DataStore [Preferences] snapshot to an [AppSettings] data class.
      * Missing keys fall back to their default values in [AppSettings].
      */
-    private fun Preferences.toAppSettings(): AppSettings = AppSettings(
-        displayName        = this[Keys.DISPLAY_NAME]            ?: "",
-        airPlayEnabled     = this[Keys.AIRPLAY_ENABLED]         ?: true,
-        miracastEnabled    = this[Keys.MIRACAST_ENABLED]        ?: true,
-        castEnabled        = this[Keys.CAST_ENABLED]            ?: true,
-        airPlayPinAuthEnabled = this[Keys.AIRPLAY_PIN_AUTH]     ?: false,
-        startOnBoot        = this[Keys.START_ON_BOOT]           ?: false,
-        showDebugOverlay   = this[Keys.SHOW_DEBUG_OVERLAY]      ?: false,
-        forceHighResolution = this[Keys.FORCE_HIGH_RESOLUTION]  ?: false,
-        mirrorAudioEnabled = this[Keys.MIRROR_AUDIO_ENABLED]    ?: true
-    )
+    private fun Preferences.toAppSettings(): AppSettings {
+        // Fall back to AppSettings.DEFAULT for unset keys — one source of truth for defaults, so a
+        // changed data-class default (e.g. Miracast/Cast off, start-on-boot on) actually takes effect
+        // at runtime instead of being silently overridden by hardcoded fallbacks here.
+        val d = AppSettings.DEFAULT
+        return AppSettings(
+            displayName        = this[Keys.DISPLAY_NAME]            ?: d.displayName,
+            airPlayEnabled     = this[Keys.AIRPLAY_ENABLED]         ?: d.airPlayEnabled,
+            miracastEnabled    = this[Keys.MIRACAST_ENABLED]        ?: d.miracastEnabled,
+            castEnabled        = this[Keys.CAST_ENABLED]            ?: d.castEnabled,
+            airPlayPinAuthEnabled = this[Keys.AIRPLAY_PIN_AUTH]     ?: d.airPlayPinAuthEnabled,
+            startOnBoot        = this[Keys.START_ON_BOOT]           ?: d.startOnBoot,
+            showDebugOverlay   = this[Keys.SHOW_DEBUG_OVERLAY]      ?: d.showDebugOverlay,
+            forceHighResolution = this[Keys.FORCE_HIGH_RESOLUTION]  ?: d.forceHighResolution,
+            mirrorAudioEnabled = this[Keys.MIRROR_AUDIO_ENABLED]    ?: d.mirrorAudioEnabled
+        )
+    }
 
     /**
      * Writes an [AppSettings] data class into a mutable [MutablePreferences].
