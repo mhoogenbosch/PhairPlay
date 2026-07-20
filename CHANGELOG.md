@@ -13,6 +13,12 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+---
+
+## [1.1.0-mh.6] - 2026-07-20
+
+Cosmetic fix so the app's status screen matches what senders see.
+
 ### Fixed
 - **Home screen shows the actual advertised name.** The "Visible as: …" label read the system device
   name (e.g. "Nokia Streaming Box 8010") instead of the configured display name, so it disagreed with
