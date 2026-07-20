@@ -13,6 +13,15 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+---
+
+## [1.1.0-mh.3] - 2026-07-20
+
+The **fleet-rollout** release. mh.2 made mirroring visible via a full-screen intent, but that
+never fired on an always-unlocked TV, so the app still didn't come forward on connect. This release
+foregrounds the app reliably, gives every TV a unique AirPlay identity, and lets each device be
+named headlessly over adb — so all seven receivers can be installed and named in one scripted pass.
+
 ### Fixed
 - **App now actually comes to the foreground on connect on an always-unlocked TV.** The
   full-screen intent added in mh.2 is *not honoured* while the device is interactive — Android
