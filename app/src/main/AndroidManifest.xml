@@ -26,6 +26,15 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Full-screen intent: brings the app (video Surface) to the front when a sender connects -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!--
+      Draw-over-other-apps: on an always-unlocked TV a full-screen intent is NOT honoured (the
+      system degrades it to a heads-up notification when the device is interactive), so the app
+      never comes forward when a sender connects and video renders onto no Surface (black screen).
+      SYSTEM_ALERT_WINDOW grants a background-activity-launch exemption, letting the service
+      startActivity() directly to bring the video Surface up. Grant on the device with:
+      adb shell appops set <pkg> SYSTEM_ALERT_WINDOW allow
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

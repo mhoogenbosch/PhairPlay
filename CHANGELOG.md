@@ -13,6 +13,22 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+### Fixed
+- **App now actually comes to the foreground on connect on an always-unlocked TV.** The
+  full-screen intent added in mh.2 is *not honoured* while the device is interactive — Android
+  degrades it to a heads-up notification, which a TV never surfaces — so the app stayed on the
+  home screen when a sender connected and video rendered onto no Surface (black screen; verified
+  2026-07-20 with logcat: session CONNECTED + H.264 flowing, Activity never launched). The service
+  now starts `MainActivity` directly when it holds the draw-over-other-apps permission
+  (`SYSTEM_ALERT_WINDOW`), which grants a background-activity-launch exemption; the full-screen
+  intent remains as a fallback for devices without the permission. The video Surface is now present
+  by the time iOS sends its connect-time IDR keyframe, so mirroring appears instantly with no manual
+  app-open or disconnect/reconnect. Grant on a device with
+  `adb shell appops set <pkg> SYSTEM_ALERT_WINDOW allow` (re-grant after any reinstall).
+
+### Added
+- `SYSTEM_ALERT_WINDOW` permission (draw over other apps) — see above.
+
 ---
 
 ## [1.1.0-mh.2] - 2026-07-19

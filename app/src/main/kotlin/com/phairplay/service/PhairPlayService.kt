@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.phairplay.MainActivity
 import com.phairplay.R
@@ -366,14 +367,35 @@ class PhairPlayService : Service() {
      * take the screen when a session starts. Ported from JObersi10/PhairPlay.
      */
     private fun bringAppToFront() {
+        val activityIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            // Tells MainActivity it was opened for this session, so it can politely step
+            // aside (back to the previous app) again once the session ends.
+            putExtra(EXTRA_AUTO_OPENED, true)
+        }
+
+        // Preferred path on an always-unlocked TV: if we hold "draw over other apps"
+        // (SYSTEM_ALERT_WINDOW), we have a background-activity-launch exemption and can start the
+        // Activity directly — the full-screen intent below is NOT honoured while the device is
+        // interactive (it degrades to a silent heads-up notification), which is exactly why the app
+        // never came forward on connect (black screen, observed 2026-07-20). The direct start makes
+        // the video Surface exist by the time iOS sends its connect-time IDR keyframe.
+        if (Settings.canDrawOverlays(this)) {
+            try {
+                startActivity(activityIntent)
+                Logger.i("bringAppToFront: startActivity (canDrawOverlays) — app to foreground")
+                return
+            } catch (e: Exception) {
+                Logger.e("bringAppToFront: direct startActivity failed — falling back to full-screen intent", e)
+            }
+        } else {
+            Logger.w("bringAppToFront: no SYSTEM_ALERT_WINDOW — full-screen intent only " +
+                     "(won't foreground on an interactive TV; grant via appops)")
+        }
+
         val pi = PendingIntent.getActivity(
             this, 99,
-            Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                // Tells MainActivity it was opened for this session, so it can politely step
-                // aside (back to the previous app) again once the session ends.
-                putExtra(EXTRA_AUTO_OPENED, true)
-            },
+            activityIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val n = NotificationCompat.Builder(this, CHANNEL_ID_INCOMING)
