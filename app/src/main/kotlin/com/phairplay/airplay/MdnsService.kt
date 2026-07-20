@@ -220,7 +220,7 @@ class MdnsService(
             port = AIRPLAY_PORT
 
             // Core identity TXT records
-            setAttribute("deviceid", NetworkUtils.getMacAddress())
+            setAttribute("deviceid", NetworkUtils.getMacAddress(context))
             setAttribute("features", AIRPLAY_FEATURES)
             setAttribute("model", AIRPLAY_MODEL)
             setAttribute("srcvers", AIRPLAY_SERVER_VERSION)
@@ -287,7 +287,7 @@ class MdnsService(
      * @param displayName The device name portion of the RAOP service name.
      */
     private fun registerRaopService(displayName: String, attempt: Int = 1) {
-        val macHex = NetworkUtils.getMacAddress().replace(":", "").uppercase()
+        val macHex = NetworkUtils.getMacAddress(context).replace(":", "").uppercase()
 
         val serviceInfo = NsdServiceInfo().apply {
             serviceName = "$macHex@${nameForAttempt(displayName, attempt)}"  // required RAOP format

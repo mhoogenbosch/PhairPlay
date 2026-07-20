@@ -25,6 +25,13 @@ its releases as `<semver>-mh.<n>` on top of the upstream
   by the time iOS sends its connect-time IDR keyframe, so mirroring appears instantly with no manual
   app-open or disconnect/reconnect. Grant on a device with
   `adb shell appops set <pkg> SYSTEM_ALERT_WINDOW allow` (re-grant after any reinstall).
+- **Unique AirPlay `deviceid` per install (fixes fleet identity collision).** Modern Android
+  withholds the real hardware MAC, so every install fell back to the same hardcoded
+  `aa:bb:cc:dd:ee:ff`. `deviceid` is the identity iOS keys an AirPlay receiver on, so multiple TVs
+  on one LAN advertised a single identity — iOS merged them and showed one name for all. When no
+  unique hardware MAC is available the `deviceid` is now derived from the per-install persistent
+  UUID as a stable, locally-administered, unicast MAC (unique per device, stable across restarts and
+  `install -r`). Also refreshes the name a previously-connected sender had cached.
 
 ### Added
 - `SYSTEM_ALERT_WINDOW` permission (draw over other apps) — see above.

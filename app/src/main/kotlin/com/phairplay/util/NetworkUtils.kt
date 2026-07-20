@@ -19,7 +19,7 @@ import java.util.UUID
  *
  * Example:
  *   val name = NetworkUtils.getDeviceName(context)   // "My Android TV"
- *   val mac  = NetworkUtils.getMacAddress()           // "aa:bb:cc:dd:ee:ff"
+ *   val mac  = NetworkUtils.getMacAddress(context)    // "aa:bb:cc:dd:ee:ff" (stable, unique per install)
  *   val uuid = NetworkUtils.getPersistentUuid(context) // stable UUID per device
  */
 object NetworkUtils {
@@ -64,27 +64,52 @@ object NetworkUtils {
      * NOTE: On Android 10+, direct MAC access is restricted. We use NetworkInterface
      * instead of WifiManager.getConnectionInfo() which is deprecated.
      *
+     * CRITICAL for a fleet: `deviceid` is the identity iOS keys an AirPlay receiver on. Modern
+     * Android withholds the real hardware MAC (returns null or the constant 02:00:00:00:00:00), so
+     * every install used to fall back to the SAME hardcoded aa:bb:cc:dd:ee:ff — meaning all TVs on
+     * the LAN advertised one identity and iOS merged them / showed one name for all. When no unique
+     * hardware MAC is available we now derive a stable, locally-administered, unicast MAC from the
+     * per-install persistent UUID, so each device gets a distinct but stable deviceid.
+     *
+     * @param context Android context (for the per-install persistent UUID fallback).
      * @return MAC address in "aa:bb:cc:dd:ee:ff" format (lowercase, colon-separated).
      */
-    fun getMacAddress(): String {
-        return try {
-            // Iterate all network interfaces to find the Wi-Fi or Ethernet interface
-            val interfaces = NetworkInterface.getNetworkInterfaces()?.toList() ?: emptyList()
+    fun getMacAddress(context: Context): String {
+        val real = readHardwareMac()
+        if (real != null && !isNonUniqueMac(real)) return real
+        return deriveStableMac(context)
+    }
 
-            val mac = interfaces
-                .filter { !it.isLoopback && it.isUp && it.hardwareAddress != null }
-                .mapNotNull { iface ->
-                    iface.hardwareAddress?.let { hwAddr ->
-                        hwAddr.joinToString(":") { byte -> "%02x".format(byte) }
-                    }
-                }
-                .firstOrNull()
+    /** Reads a real interface MAC, or null when the OS withholds it / on error. */
+    private fun readHardwareMac(): String? = try {
+        NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+            .filter { !it.isLoopback && it.isUp && it.hardwareAddress != null }
+            .mapNotNull { iface ->
+                iface.hardwareAddress?.joinToString(":") { byte -> "%02x".format(byte) }
+            }
+            .firstOrNull { !isNonUniqueMac(it) }
+    } catch (e: Exception) {
+        Timber.w(e, "Could not read MAC address — will derive a stable one")
+        null
+    }
 
-            mac ?: FALLBACK_MAC_ADDRESS
-        } catch (e: Exception) {
-            Timber.w(e, "Could not read MAC address — using fallback")
-            FALLBACK_MAC_ADDRESS
-        }
+    /** True for MACs that don't uniquely identify this device (Android's withheld-MAC constant / old fallback). */
+    private fun isNonUniqueMac(mac: String): Boolean {
+        val m = mac.lowercase()
+        return m == "02:00:00:00:00:00" || m == FALLBACK_MAC_ADDRESS
+    }
+
+    /**
+     * Derives a stable MAC unique to this install from [getPersistentUuid]. The first octet is
+     * forced to locally-administered (0x02) + unicast (low bit clear) so it's a valid, collision-free
+     * address that isn't mistaken for a real vendor MAC. Stable across restarts and `install -r`
+     * (survives as long as app data isn't cleared); a fresh install after uninstall gets a new one.
+     */
+    private fun deriveStableMac(context: Context): String {
+        val msb = UUID.fromString(getPersistentUuid(context)).mostSignificantBits
+        val bytes = ByteArray(6) { i -> ((msb ushr (8 * (5 - i))) and 0xFF).toByte() }
+        bytes[0] = ((bytes[0].toInt() and 0xFC) or 0x02).toByte()  // locally administered, unicast
+        return bytes.joinToString(":") { "%02x".format(it) }
     }
 
     /**
