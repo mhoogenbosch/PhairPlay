@@ -39,15 +39,22 @@ data class AppSettings(
     /**
      * Whether the Miracast (Wi-Fi Display) receiver is enabled.
      * When false: Wi-Fi P2P service advertisement is stopped.
+     *
+     * Default off: on Google TV / Fire TV the Wi-Fi Direct permission isn't granted, so the P2P
+     * service registration errors ("missing Wi-Fi Direct permission") — it never works and only
+     * adds a failing receiver. Turn on only where Miracast is actually needed and permitted.
      */
-    val miracastEnabled: Boolean = true,
+    val miracastEnabled: Boolean = false,
 
     /**
      * Whether the Google Cast receiver is enabled.
      * On Fire TV (no Google Play Services), this is ignored.
      * When false: Cast SDK is not initialized.
+     *
+     * Default off: these are Google TV / Fire TV devices with Chromecast built in, so PhairPlay's
+     * own Cast receiver is redundant (and can collide with the native one). AirPlay is the purpose.
      */
-    val castEnabled: Boolean = true,
+    val castEnabled: Boolean = false,
 
     // ─── AirPlay specific ──────────────────────────────────────────────────
     /**
@@ -61,8 +68,11 @@ data class AppSettings(
     /**
      * Whether PhairPlayService starts automatically on device boot.
      * Requires the RECEIVE_BOOT_COMPLETED permission to be effective.
+     *
+     * Default on: this is a receiver appliance — after a reboot it should advertise again without
+     * anyone opening the app.
      */
-    val startOnBoot: Boolean = false,
+    val startOnBoot: Boolean = true,
 
     // ─── Developer / Debug ─────────────────────────────────────────────────
     /**
