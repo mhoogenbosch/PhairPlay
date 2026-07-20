@@ -13,6 +13,12 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+### Fixed
+- **Home screen shows the actual advertised name.** The "Visible as: …" label read the system device
+  name (e.g. "Nokia Streaming Box 8010") instead of the configured display name, so it disagreed with
+  what senders actually see. It now shows `effectiveDisplayName` (falling back to the system name only
+  when unset) and updates live on a rename. (`WaitingScreen` had the same bug but is unused/dead code.)
+
 ---
 
 ## [1.1.0-mh.5] - 2026-07-20
