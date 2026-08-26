@@ -15,6 +15,36 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.7] - 2026-08-26
+
+Two receiver-reliability fixes, both from an upstream bug report that turned out to apply here
+just as much: nothing in the app kept the screen awake during a session, and nothing brought the
+mDNS advertisement back after the network dropped.
+
+### Fixed
+- **The TV's screensaver no longer interrupts an active session.** There was no
+  `FLAG_KEEP_SCREEN_ON`, no wake lock and not even the `WAKE_LOCK` permission anywhere in the
+  codebase, so any mirror, photo or audio session simply ran into the TV's own screensaver /
+  power-saving timeout. The window flag is now held for as long as the overlay is up — mirroring,
+  photos and audio-only now-playing all count as "in use" — and cleared when it comes down.
+  `FLAG_KEEP_SCREEN_ON` rather than a `PowerManager` wake lock: no permission needed, scoped to
+  this window, and Android releases it by itself if the activity dies, so a crash can never leave
+  the panel burning.
+- **The receiver becomes discoverable again after the TV wakes from standby.** Standby takes the
+  Wi-Fi interface down, an `NsdManager` registration does not survive that, and the app had no
+  path back: on wake it was still listening on port 7000, still reported itself as running, and
+  was invisible in every AirPlay picker until it was restarted by hand. A
+  `ConnectivityManager.NetworkCallback` now re-registers the advertisement whenever a network
+  becomes available, via a new `AirPlayReceiver.readvertise()` that restarts only mDNS and leaves
+  the RTSP and timing sockets alone.
+- **Wi-Fi may no longer filter away mDNS queries.** `CHANGE_WIFI_MULTICAST_STATE` had been in the
+  manifest from the start but nothing ever used it. `MdnsService` now holds a `MulticastLock` for
+  as long as it advertises, so power-save cannot drop the multicast frames that carry every
+  sender's query. The lock is deliberately kept across a `restart()`, which would otherwise open a
+  pointless window where queries are filtered again.
+
+---
+
 ## [1.1.0-mh.6] - 2026-07-20
 
 Cosmetic fix so the app's status screen matches what senders see.
