@@ -124,6 +124,10 @@ class MainActivity : AppCompatActivity() {
 
         autoOpenedForSession =
             intent?.getBooleanExtra(PhairPlayService.EXTRA_AUTO_OPENED, false) == true
+        // A launch WITHOUT that extra is the user opening the app themselves, which is as much
+        // intent as pressing a button once inside it — so that stint counts as user-driven and
+        // must never retreat. See [markManualLaunchAsUserDriven].
+        if (!autoOpenedForSession) markManualLaunchAsUserDriven()
 
         // Start the service immediately so it's running before any sender discovers us
         ServiceController.start(this)
@@ -139,7 +143,30 @@ class MainActivity : AppCompatActivity() {
         if (intent?.getBooleanExtra(PhairPlayService.EXTRA_AUTO_OPENED, false) == true) {
             autoOpenedForSession = true
             sessionSeen = false
+            // Genuinely auto-opened: this stint is not user-driven, whatever a previous one was.
+            userInteractedThisForeground = false
+        } else {
+            markManualLaunchAsUserDriven()
         }
+    }
+
+    /**
+     * Marks this foreground stint as user-driven when the Activity was opened by hand.
+     *
+     * `updateOverlay` retreats with `moveTaskToBack` after a session, but only for a window the
+     * service auto-opened. Its fallback heuristic — "no interaction seen, so we must have been
+     * auto-opened" — misreads the one case where the user opens the app from the launcher and
+     * then starts casting without touching the TV remote again: `onUserInteraction` never fires,
+     * because the button press that launched the app went to the launcher, not to us. The window
+     * the user deliberately opened was then backed out from under them at the end of the session,
+     * leaving whatever happened to be behind it — on a TV that is usually nothing, i.e. a black
+     * screen. Reported on a Sony X90J (upstream PR #13).
+     *
+     * The absence of [PhairPlayService.EXTRA_AUTO_OPENED] is the reliable signal: only the service
+     * ever sets it. Appliance behaviour is unaffected — that path always carries the extra.
+     */
+    private fun markManualLaunchAsUserDriven() {
+        userInteractedThisForeground = true
     }
 
     override fun onStart() {

@@ -15,6 +15,23 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.8] - 2026-08-27
+
+### Fixed
+- **A window you opened yourself is no longer backed out from under you when a session ends.** Since
+  mh.4 the app steps aside with `moveTaskToBack` after a session, so a TV that was auto-opened for an
+  incoming stream returns to whatever was on screen before. That is right for the auto-opened case, but
+  its fallback heuristic — "no interaction seen, so we must have been auto-opened" — misread the one
+  case where you launch the app from the launcher and then start casting without touching the TV remote
+  again: `onUserInteraction` never fires, because the button press that launched the app went to the
+  launcher, not to the app. Ending the stream then retreated the window the user had deliberately
+  opened, leaving whatever was behind it — on a TV usually nothing, i.e. a **black screen**. A launch
+  without `EXTRA_AUTO_OPENED` (which only the service ever sets) now counts as user intent, so it never
+  retreats. Appliance behaviour is unchanged: that path always carries the extra. Reported by
+  @sigurdshilfe on a Sony X90J.
+
+---
+
 ## [1.1.0-mh.7] - 2026-08-26
 
 Two receiver-reliability fixes, both from an upstream bug report that turned out to apply here
