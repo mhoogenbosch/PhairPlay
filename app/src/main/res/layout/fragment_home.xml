@@ -91,6 +91,42 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- ── Overlay-permission warning (hidden unless the permission is missing) ──
+             Without SYSTEM_ALERT_WINDOW the service cannot foreground itself on a TV,
+             so mirroring decodes but never becomes visible. FTP-sideloaders can't run
+             `appops`, so this banner sends them straight to the settings screen. -->
+        <LinearLayout
+            android:id="@+id/banner_overlay_permission"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="#33FFD60A"
+            android:padding="16dp"
+            android:layout_marginBottom="24dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="16dp"
+                android:text="@string/overlay_permission_message"
+                android:textColor="@color/text_primary"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/btn_grant_overlay"
+                android:layout_width="wrap_content"
+                android:layout_height="56dp"
+                android:paddingHorizontal="24dp"
+                android:text="@string/overlay_permission_button"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:background="@drawable/btn_control_selector"
+                android:focusable="true" />
+        </LinearLayout>
+
         <!-- ── Section: Protocol status cards ────────────────────────── -->
         <TextView
             android:layout_width="wrap_content"

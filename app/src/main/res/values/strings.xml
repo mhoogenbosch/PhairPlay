@@ -114,6 +114,10 @@
     <string name="error_wifi_p2p_unavailable">Miracast is not supported on this device.</string>
     <string name="error_cast_unavailable">Google Cast requires Google Play Services (not available on this device).</string>
 
+    <!-- ── Overlay permission banner ───────────────────────────── -->
+    <string name="overlay_permission_message">Mirroring can\'t appear on screen: PhairPlay needs the “Display over other apps” permission to come to the foreground on a TV. Grant it, then return here.</string>
+    <string name="overlay_permission_button">Grant permission</string>
+
     <!-- ── Accessibility ───────────────────────────────────────── -->
     <string name="content_desc_airplay_icon">AirPlay protocol icon</string>
     <string name="content_desc_miracast_icon">Miracast protocol icon</string>

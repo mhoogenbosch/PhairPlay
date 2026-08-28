@@ -5,8 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.os.IBinder
+import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -70,6 +72,8 @@ class HomeFragment : Fragment() {
     private lateinit var btnStart: Button
     private lateinit var btnStop: Button
     private lateinit var btnRestart: Button
+    private lateinit var bannerOverlayPermission: View
+    private lateinit var btnGrantOverlay: Button
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View =
         inflater.inflate(R.layout.fragment_home, container, false)
@@ -79,7 +83,15 @@ class HomeFragment : Fragment() {
         bindViews(view)
         configureProtocolCards()
         configureButtons()
+        configureOverlayPermissionBanner()
         showDeviceName()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Re-checked here so the banner clears the moment the user returns from the
+        // settings screen having granted the permission.
+        updateOverlayPermissionBanner()
     }
 
     override fun onStart() {
@@ -109,6 +121,8 @@ class HomeFragment : Fragment() {
         btnStart         = view.findViewById(R.id.btn_start)
         btnStop          = view.findViewById(R.id.btn_stop)
         btnRestart       = view.findViewById(R.id.btn_restart)
+        bannerOverlayPermission = view.findViewById(R.id.banner_overlay_permission)
+        btnGrantOverlay  = view.findViewById(R.id.btn_grant_overlay)
     }
 
     /**
@@ -143,6 +157,45 @@ class HomeFragment : Fragment() {
             Logger.d("User tapped Restart")
             ServiceController.restart(requireContext())
         }
+    }
+
+    // ─── Overlay permission ────────────────────────────────────────────────────
+
+    /**
+     * Wires the "grant Display over other apps" button. Without SYSTEM_ALERT_WINDOW the
+     * service cannot foreground itself on a TV (bringAppToFront falls back to a full-screen
+     * intent that an always-interactive TV ignores), so mirroring decodes but never shows.
+     * FTP-sideloaders can't run the `appops` grant that the ADB install applies, so we send
+     * them straight to the system screen instead.
+     */
+    private fun configureOverlayPermissionBanner() {
+        btnGrantOverlay.setOnClickListener {
+            val pkg = requireContext().packageName
+            // Prefer the app-scoped overlay screen; fall back to the generic one, then to
+            // the app's details page — TV Settings vary in which of these they expose.
+            val intents = listOf(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$pkg")),
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION),
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$pkg"))
+            )
+            for (intent in intents) {
+                if (runCatching { startActivity(intent); true }.getOrDefault(false)) {
+                    Logger.i("Overlay grant: opened ${intent.action}")
+                    return@setOnClickListener
+                }
+            }
+            Logger.w("Overlay grant: no settings screen could be opened")
+        }
+    }
+
+    /**
+     * Shows the banner only while the overlay permission is missing, and focuses its button
+     * so a remote user lands on the fix. Called from onResume so it clears on return.
+     */
+    private fun updateOverlayPermissionBanner() {
+        val missing = !Settings.canDrawOverlays(requireContext())
+        bannerOverlayPermission.visibility = if (missing) View.VISIBLE else View.GONE
+        if (missing) btnGrantOverlay.requestFocus()
     }
 
     /**
