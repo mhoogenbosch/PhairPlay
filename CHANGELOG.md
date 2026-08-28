@@ -15,6 +15,16 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.10] - 2026-08-28
+
+### Added
+- **In-app "Display over other apps" prompt.** Without `SYSTEM_ALERT_WINDOW` the service can't bring
+  itself to the foreground on a TV, so mirroring decodes but never becomes visible (black screen /
+  stuck on "mirroring"). The Home screen now shows a banner when the permission is missing, with a
+  button that opens the system grant screen directly — for users who sideload over FTP and can't run
+  the `appops` grant that the ADB install applies. The banner clears automatically once granted
+  (re-checked on resume). Diagnosed from a field log in #15.
+
 ## [1.1.0-mh.9] - 2026-08-27
 
 ### Changed
