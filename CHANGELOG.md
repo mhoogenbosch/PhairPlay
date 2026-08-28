@@ -15,6 +15,18 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.9] - 2026-08-27
+
+### Changed
+- The persistent diagnostic log (`phairplay.log`) is now written to the app's **external**
+  files directory (`/sdcard/Android/data/<package>/files/phairplay.log`) when available,
+  instead of internal storage. This makes it retrievable over **FTP or a file manager without
+  adb or root** — for users who sideload by FTP and cannot capture logcat. Falls back to
+  internal storage when no external files dir is available. Requested in #15 to debug the
+  Safari-fullscreen video crash. The `:8001` dump and `:8002` live-tail are unchanged.
+
+---
+
 ## [1.1.0-mh.8] - 2026-08-27
 
 ### Fixed
