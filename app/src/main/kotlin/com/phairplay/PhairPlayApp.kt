@@ -36,7 +36,11 @@ class PhairPlayApp : Application() {
      * - The ability to swap the log backend (useful for crash reporting in future)
      */
     private fun initLogging() {
-        LogBuffer.init(filesDir)
+        // Persist the log to the app's external files dir when available
+        // (/sdcard/Android/data/<pkg>/files/phairplay.log), so it can be retrieved
+        // over FTP or a file manager without adb or root — useful for users who
+        // sideload by FTP and cannot run logcat. Falls back to internal storage.
+        LogBuffer.init(getExternalFilesDir(null) ?: filesDir)
         if (BuildConfig.DEBUG) {
             // Debug tree: logs everything, shows file names and line numbers
             Timber.plant(Timber.DebugTree())
