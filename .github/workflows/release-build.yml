@@ -1,0 +1,59 @@
+# Release build — produces UNSIGNED release APKs for both flavors as workflow artifacts.
+#
+# Signing stays local (the release keystore never leaves the maintainer's machine): download
+# the artifact and sign with `apksigner` using the credentials from ~/.config/phairplay/release.env,
+# exactly as scripts/release.sh does after its own local build. This workflow exists because a
+# local build needs x86_64 Android build-tools/NDK, which an arm64 workstation cannot run.
+#
+# Runs on every pull request against main (so a PR can be test-installed before merging), on a
+# v* tag, and by hand:
+#   gh workflow run release-build.yml --ref <branch>
+
+name: Release build (unsigned)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ "main" ]
+  push:
+    tags: [ "v*" ]
+
+jobs:
+  release-apks:
+    name: Unsigned release APKs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant Gradle wrapper execute permission
+        run: chmod +x gradlew
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+
+      - name: Write local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Build release APKs (unsigned — no KEYSTORE_PATH in CI)
+        run: ./gradlew :app:assembleGoogletvRelease :app:assembleFiretvRelease --stacktrace
+
+      - name: Upload unsigned release APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-unsigned-apks
+          path: |
+            app/build/outputs/apk/googletv/release/*.apk
+            app/build/outputs/apk/firetv/release/*.apk
+          retention-days: 14
+          if-no-files-found: error

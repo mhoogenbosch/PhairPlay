@@ -116,6 +116,11 @@ class PhairPlayService : Service() {
     @Volatile
     private var appliedDisplayName: String? = null
 
+    // When [_airPlayState] last changed — lets the health check tell a transient DISABLED
+    // (the ~1 s between an mDNS stop and its re-registration) from one that is stuck.
+    @Volatile
+    private var airPlayStateSince: Long = System.currentTimeMillis()
+
     // ─── Service Lifecycle ───────────────────────────────────────────────────
 
     override fun onCreate() {
@@ -126,6 +131,58 @@ class PhairPlayService : Service() {
         DiagnosticServer.start(serviceScope)
         observeDisplayNameChanges()
         registerNetworkCallback()
+        startAirPlayHealthCheck()
+    }
+
+    /**
+     * Slow, last-line-of-defence supervision of the AirPlay receiver.
+     *
+     * [com.phairplay.airplay.MdnsService] supervises its own (re)registration and self-probes
+     * its visibility; this loop catches whatever is left: an AirPlay toggle that is on while the
+     * state has sat on DISABLED or ERROR for longer than [HEALTH_CHECK_MIN_AGE_MS], or a receiver
+     * that is missing altogether. Observed 2026-09-21 on a Google TV box: toggle on, state
+     * "Disabled" for an unknown number of hours, RTSP still listening, invisible to every sender,
+     * fixed by nothing short of a reboot. A receiver appliance must recover from that on its own.
+     *
+     * Every [HEALTH_CHECK_INTERVAL_MS]; a no-op while the service is not Running (stopped or
+     * restarting) or while AirPlay is disabled in Settings.
+     */
+    private fun startAirPlayHealthCheck() {
+        serviceScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(HEALTH_CHECK_INTERVAL_MS)
+                try {
+                    checkAirPlayHealth()
+                } catch (e: Exception) {
+                    Logger.w("AirPlay health check failed: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private suspend fun checkAirPlayHealth() {
+        if (_serviceState.value != ServiceState.Running) return
+        val settings = settingsRepository.settingsFlow.first()
+        if (!settings.airPlayEnabled) return
+
+        val receiver = airPlayReceiver
+        if (receiver == null) {
+            Logger.w("AirPlay health check: AirPlay is enabled but no receiver is running — starting it")
+            startAirPlay(settings)
+            return
+        }
+        val state = _airPlayState.value
+        val ageMs = System.currentTimeMillis() - airPlayStateSince
+        if ((state == ProtocolState.DISABLED || state == ProtocolState.ERROR) &&
+            ageMs >= HEALTH_CHECK_MIN_AGE_MS) {
+            Logger.w("AirPlay health check: state has been $state for ${ageMs / 1000}s while " +
+                     "AirPlay is enabled — re-advertising")
+            if (!receiver.readvertise()) {
+                Logger.w("AirPlay health check: receiver has no mDNS service to restart — " +
+                         "restarting all receivers")
+                restartReceivers()
+            }
+        }
     }
 
     /**
@@ -371,6 +428,7 @@ class PhairPlayService : Service() {
                 _pairingPin.value = pin
             },
             onStateChanged = { state ->
+                if (_airPlayState.value != state) airPlayStateSince = System.currentTimeMillis()
                 _airPlayState.value = state
                 when (state) {
                     ProtocolState.CONNECTED   -> {
@@ -583,6 +641,11 @@ class PhairPlayService : Service() {
         const val CHANNEL_ID_INCOMING = "phairplay_incoming_channel"
         const val NOTIFICATION_ID = 1001
         const val NOTIFICATION_ID_INCOMING = 1002
+
+        /** Cadence of [checkAirPlayHealth]. */
+        private const val HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000L
+        /** How long DISABLED/ERROR must persist before the health check acts on it. */
+        private const val HEALTH_CHECK_MIN_AGE_MS = 60 * 1000L
         /** Intent extra marking that MainActivity was auto-opened for an incoming session. */
         const val EXTRA_AUTO_OPENED = "com.phairplay.extra.AUTO_OPENED_FOR_SESSION"
         const val ACTION_START    = "com.phairplay.action.START"
