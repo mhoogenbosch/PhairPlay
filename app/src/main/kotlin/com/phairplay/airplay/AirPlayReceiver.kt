@@ -207,10 +207,13 @@ class AirPlayReceiver(
      * but that needlessly drops the sockets; only the advertisement is stale.
      *
      * No-op when the receiver was never started.
+     *
+     * @return false when there is no mDNS service to restart (receiver never got that far), so
+     *   the caller can escalate to a full receiver restart instead.
      */
-    fun readvertise() {
-        val mdns = mdnsService ?: return
-        Logger.i("Re-advertising AirPlay over mDNS (network returned)")
+    fun readvertise(): Boolean {
+        val mdns = mdnsService ?: return false
+        Logger.i("Re-advertising AirPlay over mDNS")
         scope.launch {
             try {
                 mdns.restart(displayName.ifBlank { null })
@@ -218,6 +221,7 @@ class AirPlayReceiver(
                 Logger.e("Failed to re-advertise mDNS", e)
             }
         }
+        return true
     }
 
     // ─── Private: startup ────────────────────────────────────────────────────

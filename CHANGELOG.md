@@ -15,6 +15,44 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.11] - 2026-09-22
+
+### Fixed
+- **AirPlay could end up "Disabled" with the toggle on — and stay there.** Seen 2026-09-21 on a
+  Google TV box: the receiver still listened on port 7000 and reported itself running, but the
+  Home screen said "Disabled" and no iPhone could see it; only a reboot helped. That state is
+  only reachable when an mDNS restart never completes (`stop()` emits Disabled, Advertising is
+  emitted once *both* registrations confirm). Two gaps closed in `MdnsService`:
+  - `_raop._tcp` now has the same stuck-probing watchdog as `_airplay._tcp`; a silent RAOP
+    registration used to block Advertising forever.
+  - `stop()`/`start()`/`restart()` are synchronized and the pending-unregistration count is set
+    before callbacks can observe it. Before, a fast unregistration callback could complete a
+    pending restart while `stop()` was still tearing down, and the tail of `stop()` then wiped
+    the brand-new listeners and watchdog.
+  - `registerService()` exceptions are caught and treated as a failed attempt instead of
+    crashing the Handler thread they were thrown on.
+
+### Added
+- **Start-to-Advertising watchdog.** A start that has not reached "both registered" within 20 s
+  is restarted (max 3×), then reported as Error — instead of sitting on Disabled indefinitely.
+- **mDNS self-probe.** After both registrations confirm, the service browses `_airplay._tcp` for
+  10 s and checks that its own name comes back over the wire. "Android says registered" turned
+  out not to mean "senders can see us"; if the name is not seen, the advertisement is redone
+  (max 2× per process, then the probe only logs so a platform that never shows its own
+  services in discovery cannot make the name flap).
+- **Service-level health check** every 5 min: AirPlay enabled but state Disabled/Error for
+  more than 60 s → re-advertise (or restart the receivers when there is nothing to re-advertise);
+  receiver missing → start it.
+- **Unsigned release build in CI** (`release-build.yml`, manual/tag-triggered): produces both
+  flavors as an artifact for local signing, so releases no longer require an x86_64 build host.
+
+### Changed
+- `phairplay.log` keeps 5000 lines (was 1000) and no longer stores VERBOSE lines; a single
+  mirror session used to overwrite the whole file, which is why the 2026-09-21 incident left no
+  trace. Trimming now has hysteresis instead of rewriting the file on every line once full.
+
+---
+
 ## [1.1.0-mh.10] - 2026-08-28
 
 ### Added
