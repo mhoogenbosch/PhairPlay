@@ -13,6 +13,12 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+### CI
+- GitHub Actions bumped to their current majors — `actions/checkout@v7`, `actions/setup-java@v6`,
+  `actions/upload-artifact@v7`, `android-actions/setup-android@v4` — clearing the Node.js 20 and
+  setup-java v4 deprecation warnings on every job. No effect on the APK (JDK stays Temurin 17).
+- Dependabot now watches `github-actions` weekly, so action updates arrive as PRs.
+
 ---
 
 ## [1.1.0-mh.11] - 2026-09-22
