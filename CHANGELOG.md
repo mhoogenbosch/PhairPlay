@@ -33,9 +33,6 @@ its releases as `<semver>-mh.<n>` on top of the upstream
   asks for this FairPlay variant before AirPlay video; with 501 it waited forever on an open
   connection (seen on the Nokia: the video hung on "connecting"). UxPlay can't do fp-setup2 either
   and answers 421, after which the sender continues.
-- **`GET /server-info` advertises the AirPlay-video feature set `0x27F`** (as UxPlay) instead of the
-  full 64-bit mirroring set. That request only comes on the video path; with the mirroring set the
-  YouTube app went for `fp-setup2` and stalled. Mirroring (mDNS TXT, `GET /info`) is unchanged.
 - **`POST /play` and `POST /action` are logged in full** (plists decoded, nested plists and
   playlists shown). A `mlhls://` (sender-mediated HLS) URL is acknowledged but not handed to the
   player, which can't play it — playback is phase 2.
