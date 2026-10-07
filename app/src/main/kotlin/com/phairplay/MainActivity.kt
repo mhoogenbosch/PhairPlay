@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -91,6 +92,17 @@ class MainActivity : AppCompatActivity() {
     // collectors (lifecycleScope only cancels them in onDestroy), all calling updateOverlay().
     private val overlayJobs = mutableListOf<Job>()
 
+    // Back during screen mirroring used to finish the Activity while the session kept running: the
+    // iPhone still showed "mirroring" but the TV fell back to the launcher, and the picture only came
+    // back by reopening the app. While mirroring, Back is swallowed; the sender ends the session.
+    // Enabled/disabled from updateOverlay(), so Back behaves normally everywhere else (idea:
+    // RajaRakshith/PhairPlay).
+    private val swallowBackWhileMirroring = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            Timber.d("Back ignored — mirroring session active (stop it on the sender)")
+        }
+    }
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             service = (binder as? PhairPlayService.LocalBinder)?.getService()
@@ -122,6 +134,7 @@ class MainActivity : AppCompatActivity() {
         bindViews()
         setupOverlayScreens()
         setupNavigation()
+        onBackPressedDispatcher.addCallback(this, swallowBackWhileMirroring)
 
         // Show HomeFragment on first launch
         if (savedInstanceState == null) {
@@ -480,6 +493,10 @@ class MainActivity : AppCompatActivity() {
             photoFrame != null -> showPhotoScreen(photoFrame)
             else -> hideStreamingScreen()
         }
+
+        // Only video mirroring: on the now-playing card or a photo, Back keeps leaving the app.
+        swallowBackWhileMirroring.isEnabled =
+            pin == null && nowPlaying == null && currentAirPlayState == ProtocolState.CONNECTED
 
         val sessionActive = pin != null || nowPlaying != null || photoFrame != null ||
                 currentAirPlayState == ProtocolState.CONNECTED
