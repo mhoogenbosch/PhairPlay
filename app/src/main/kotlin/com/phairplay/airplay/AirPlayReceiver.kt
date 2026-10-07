@@ -136,6 +136,8 @@ class AirPlayReceiver(
     @Volatile private var streamingStopped = false
     @Volatile private var videoPlaying = false
     @Volatile private var npSenderName = "AirPlay"
+    // Name mDNS actually registered (may carry a " (2)" collision suffix); GET /info must match it.
+    @Volatile private var registeredName: String? = null
     @Volatile private var npTitle: String? = null
     @Volatile private var npArtist: String? = null
     @Volatile private var npAlbum: String? = null
@@ -235,7 +237,10 @@ class AirPlayReceiver(
         mdnsService = MdnsService(
             context = context,
             onStateChange = { state -> emitState(state) },
-            onActualNameRegistered = { actualName -> onActualNameRegistered(actualName) }
+            onActualNameRegistered = { actualName ->
+                registeredName = actualName
+                onActualNameRegistered(actualName)
+            }
         ).also { it.start(displayName.ifBlank { null }) }
         Logger.d("mDNS service started")
     }
@@ -251,8 +256,11 @@ class AirPlayReceiver(
             onStreamingStopped = { onStreamingStopped() },
             onPhotoReceived = { bytes, imageType -> onPhotoReceived(bytes, imageType) },
             onPhotoCleared = { onPhotoCleared() },
-            onMirrorSetupKeys = { aesKey, ecdhSecret, aesIv, remoteAddr, senderTimingPort ->
-                startMirrorKeys(aesKey, ecdhSecret, aesIv, remoteAddr, senderTimingPort)
+            onMirrorSetupKeys = { aesKey, ecdhSecret, aesIv, remoteAddr, senderTimingPort, senderName ->
+                startMirrorKeys(aesKey, ecdhSecret, aesIv, remoteAddr, senderTimingPort, senderName)
+            },
+            receiverNameProvider = {
+                registeredName ?: displayName.ifBlank { com.phairplay.util.NetworkUtils.getDeviceName(context) }
             },
             onMirrorStreamStart = { streamConnectionId -> startMirrorStream(streamConnectionId) },
             onMirrorAudioStart = { sampleRate, channels, ct, spf -> startMirrorAudio(sampleRate, channels, ct, spf) },
@@ -448,7 +456,9 @@ class AirPlayReceiver(
         aesIv: ByteArray,
         remoteAddress: java.net.InetAddress,
         senderTimingPort: Int,
+        senderName: String? = null,
     ): Pair<Int, Int> {
+        senderName?.let { npSenderName = it }
         mirrorAesKey = aesKey
         mirrorEcdhSecret = ecdhSecret
         mirrorAesIv = aesIv
@@ -473,9 +483,9 @@ class AirPlayReceiver(
         }
         // AirPlay 2 NTP is receiver-initiated: poll the sender's timing port so macOS proceeds.
         val ntp = AirPlayNtpClient(remoteAddress, senderTimingPort).also { ntpClient = it; it.start(scope) }
-        onSenderNameChanged("AirPlay")
+        onSenderNameChanged(senderName ?: "AirPlay")
         emitState(ProtocolState.CONNECTED)
-        Logger.i("Mirror keys set; eventPort=${event.localPort} timingPort=${ntp.localPort}")
+        Logger.i("Mirror keys set (sender='${senderName ?: "?"}'); eventPort=${event.localPort} timingPort=${ntp.localPort}")
         return event.localPort to ntp.localPort
     }
 

@@ -86,7 +86,7 @@ class MainActivityTest {
 
     @Test
     fun `surface provider returns null after being cleared`() {
-        // After onStop(), we set the provider to { null } to release the Surface reference
+        // When the Activity finishes (onStop + isFinishing) the provider is set to { null }
         var provider: (() -> Any?)? = { null }
 
         val result = provider?.invoke()
@@ -104,11 +104,11 @@ class MainActivityTest {
 
     @Test
     fun `provider can be reassigned from non-null to null`() {
-        // Simulates the onStart → onStop transition
+        // Simulates the onStart → finishing onStop transition
         var provider: (() -> Any?)? = { Any() }
         assertNotNull(provider?.invoke())
 
-        // Simulate onStop: clear the provider
+        // Simulate a finishing onStop: clear the provider
         provider = { null }
         assertNull(provider.invoke())
     }

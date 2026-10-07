@@ -16,7 +16,18 @@ import com.phairplay.util.NetworkUtils
  */
 object InfoResponder {
 
-    fun build(context: Context, width: Int = 1920, height: Int = 1080, pinRequired: Boolean = false): ByteArray {
+    /**
+     * @param name The name the receiver is advertised under. Must match the mDNS name: returning
+     *   the Android system name here (as before) made a renamed TV show up under its factory name
+     *   ("Nokia Streaming Box 8010") once the sender connected.
+     */
+    fun build(
+        context: Context,
+        name: String = NetworkUtils.getDeviceName(context),
+        width: Int = 1920,
+        height: Int = 1080,
+        pinRequired: Boolean = false,
+    ): ByteArray {
         val mac = NetworkUtils.getMacAddress(context)
         // When PIN access control is on, set the "pairing/PIN required" status bit so the sender runs
         // the SRP pair-setup flow. NOTE: exact flag semantics are sender-version-dependent — verify
@@ -28,7 +39,7 @@ object InfoResponder {
             "features" to AIRPLAY_FEATURES,
             "statusFlags" to statusFlags,
             "model" to MODEL,
-            "name" to NetworkUtils.getDeviceName(context),
+            "name" to name,
             "sourceVersion" to SOURCE_VERSION,
             "pi" to NetworkUtils.getPersistentUuid(context),
             "pk" to PairingKeys.get(context).edPublic,

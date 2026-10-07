@@ -1,6 +1,7 @@
 package com.phairplay.airplay.handshake
 
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
@@ -34,5 +35,22 @@ class AudioStreamServerTest {
             byteArrayOf(0xF8.toByte(), 0xE6.toByte(), 0x30.toByte(), 0x00.toByte()),
             AudioStreamServer.buildAacEldAsc(48000, 1)
         )
+    }
+
+    @Test
+    fun `pre-roll holds 200 ms of ALAC at 44_1 kHz with 352-sample packets`() {
+        // 0.2 s × 44100 = 8820 samples → 25.06 packets → rounded up to 26.
+        assertEquals(26, AudioStreamServer.prerollFramesFor(AudioStreamServer.CT_ALAC, 44100, 352))
+    }
+
+    @Test
+    fun `no pre-roll for mirroring audio, which must track the video`() {
+        assertEquals(0, AudioStreamServer.prerollFramesFor(AudioStreamServer.CT_AAC_ELD, 44100, 480))
+    }
+
+    @Test
+    fun `pre-roll is zero for nonsense stream parameters`() {
+        assertEquals(0, AudioStreamServer.prerollFrameCount(44100, 0))
+        assertEquals(0, AudioStreamServer.prerollFrameCount(0, 352))
     }
 }

@@ -106,11 +106,11 @@ class NetworkUtilsTest {
      *
      * NOTE: In the JVM test environment, NetworkInterface returns the host's real
      * network interfaces. If none have a hardware address, the fallback
-     * "aa:bb:cc:dd:ee:ff" is returned — which also satisfies the format check.
+     * MAC derived from the install UUID is returned — which also satisfies the format check.
      */
     @Test
     fun `getMacAddress returns a valid MAC address format`() {
-        val mac = NetworkUtils.getMacAddress()
+        val mac = NetworkUtils.getMacAddress(mockContext)
 
         assertNotNull("MAC address should not be null", mac)
         assertTrue(

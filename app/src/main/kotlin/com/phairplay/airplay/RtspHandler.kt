@@ -37,8 +37,8 @@ open class RtspHandler(
      */
     private val onMirrorSetupKeys: (
         aesKey: ByteArray, ecdhSecret: ByteArray, aesIv: ByteArray,
-        remoteAddress: java.net.InetAddress, senderTimingPort: Int
-    ) -> Pair<Int, Int> = { _, _, _, _, _ -> 0 to 0 },
+        remoteAddress: java.net.InetAddress, senderTimingPort: Int, senderName: String?
+    ) -> Pair<Int, Int> = { _, _, _, _, _, _ -> 0 to 0 },
     /** AirPlay 2 mirror SETUP: start the video data server (type 110); returns its data port. */
     private val onMirrorStreamStart: (streamConnectionId: Long) -> Int = { 0 },
     /** AirPlay 2 SETUP: start the audio server (type 96; ct 8 AAC-ELD mirror / 4 AAC-LC / 2 ALAC). spf = samples/frame. */
@@ -67,6 +67,8 @@ open class RtspHandler(
     private val onVideoStop: () -> Unit = {},
     /** Current URL-video playback snapshot for GET /playback-info and GET /scrub. */
     private val onPlaybackInfo: () -> com.phairplay.airplay.PlaybackInfo? = { null },
+    /** Name the receiver is advertised under (mDNS, after collision suffixes) — returned by GET /info. */
+    private val receiverNameProvider: () -> String = { com.phairplay.util.NetworkUtils.getDeviceName(context) },
     /** Sender's DACP reverse-control identity from RTSP headers (DACP-ID + Active-Remote token). */
     private val onRemoteControlInfo: (dacpId: String?, activeRemote: String?) -> Unit = { _, _ -> },
     /** When true, require HomeKit-style SRP PIN pairing before streaming (gated by AppSettings). */
@@ -223,12 +225,23 @@ open class RtspHandler(
         // lifetime — replaced by the next /pair-pin-start, set on a successful pairing.
         currentRemoteAddress = socket.inetAddress
 
+        // This server handles ONE control connection at a time (handleClient runs inside the accept
+        // loop). A sender that vanishes mid-handshake — Wi-Fi drop, phone locked during pairing —
+        // never sends FIN, so without a read timeout port 7000 stayed occupied forever: the TV was
+        // still advertised but nobody could connect until a restart. Bound the idle time until a
+        // stream is SETUP; after that a session may legitimately sit quiet (audio-only, paused).
+        socket.soTimeout = PRE_SESSION_IDLE_TIMEOUT_MS
+
         try {
             while (running && !socket.isClosed) {
                 val request = requestReader.read(inputStream) ?: break
                 currentCSeq = request.headers["CSeq"]?.toIntOrNull() ?: 0
                 val response = routeRequest(request)
                 sendResponse(outputStream, response)
+                if (socket.soTimeout != 0 && (isMirrorSession || setupCount > 0)) {
+                    socket.soTimeout = 0
+                    Logger.d("RTSP: session established — control-socket idle timeout off")
+                }
 
                 // After RECORD on a legacy SDP session: a session WITH video switches to interleaved
                 // RTP (video arrives $-framed over this TCP socket). An audio-only session (e.g. Apple
@@ -254,6 +267,9 @@ open class RtspHandler(
                     }
                 )
             }
+        } catch (e: java.net.SocketTimeoutException) {
+            Logger.w("RTSP: no request from ${socket.inetAddress.hostAddress} for " +
+                "${PRE_SESSION_IDLE_TIMEOUT_MS / 1000}s before any stream was set up — dropping the connection")
         } catch (e: Exception) {
             if (running) Logger.e("Error handling RTSP client", e)
         } finally {
@@ -476,7 +492,8 @@ open class RtspHandler(
     private fun handleInfo(request: RtspRequest): RtspResponse = RtspResponse(
         statusCode = 200,
         statusMessage = "OK",
-        bodyBytes = InfoResponder.build(context, displayWidth, displayHeight, pinRequired = pinAuthEnabled),
+        bodyBytes = InfoResponder.build(context, receiverNameProvider(), displayWidth, displayHeight,
+            pinRequired = pinAuthEnabled),
         contentType = "application/x-apple-binary-plist",
         protocol = request.responseProtocol()
     )
@@ -629,7 +646,10 @@ open class RtspHandler(
             val aesIv = (req["eiv"] as? ByteArray) ?: ByteArray(16)
             val senderTimingPort = (req["timingPort"] as? Long)?.toInt() ?: 0
             val remoteAddr = currentRemoteAddress ?: error("mirror SETUP without remote address")
-            val (eventPort, timingPort) = onMirrorSetupKeys(aesKey, ecdhSecret, aesIv, remoteAddr, senderTimingPort)
+            // iOS/macOS put the device's user-visible name (e.g. "Anna's iPhone") in this plist.
+            val senderName = (req["name"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
+            val (eventPort, timingPort) =
+                onMirrorSetupKeys(aesKey, ecdhSecret, aesIv, remoteAddr, senderTimingPort, senderName)
             response["eventPort"] = eventPort.toLong()
             response["timingPort"] = timingPort.toLong()
             Logger.i("mirror SETUP keys OK — eventPort=$eventPort timingPort=$timingPort (sender timing $senderTimingPort)")
@@ -985,6 +1005,8 @@ open class RtspHandler(
 
     companion object {
         private const val RTSP_PORT = 7000
+        /** Idle read timeout on the control socket until a stream is SETUP (see handleClient). */
+        private const val PRE_SESSION_IDLE_TIMEOUT_MS = 120_000
 
         // SRP PIN access control. macOS's AirPlay code-entry field is exactly 4 digits, so the PIN
         // must be 4 digits to be enterable. A 4-digit space is low-entropy, so the load-bearing

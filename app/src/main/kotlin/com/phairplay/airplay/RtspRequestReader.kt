@@ -45,7 +45,10 @@ internal class RtspRequestReader(
     }
 
     private fun readHeaders(inputStream: InputStream, requestLineBytes: Int): Map<String, String>? {
-        val headers = mutableMapOf<String, String>()
+        // Header names are case-insensitive (RFC 2326 / 7230). Lookups use canonical spelling
+        // ("Content-Length", "CSeq"); a sender writing "content-length" would otherwise leave the
+        // body unread in the socket and desync every following request on the connection.
+        val headers = java.util.TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER)
         var totalBytes = requestLineBytes
 
         while (true) {
