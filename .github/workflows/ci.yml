@@ -38,17 +38,19 @@ jobs:
           if-no-files-found: ignore
 
   android-build:
-    name: Android lint & debug APK (${{ matrix.flavor }})
+    name: Android unit tests, lint & debug APK (${{ matrix.flavor }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - flavor: googletv
+            test_task: :app:testGoogletvDebugUnitTest
             lint_task: :app:lintGoogletvDebug
             assemble_task: :app:assembleGoogletvDebug
             apk_path: app/build/outputs/apk/googletv/debug/app-googletv-debug.apk
           - flavor: firetv
+            test_task: :app:testFiretvDebugUnitTest
             lint_task: :app:lintFiretvDebug
             assemble_task: :app:assembleFiretvDebug
             apk_path: app/build/outputs/apk/firetv/debug/app-firetv-debug.apk
@@ -74,6 +76,21 @@ jobs:
 
       - name: Write local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      # The :test-runner JVM suite above excludes the Android-heavy tests (MdnsService, NetworkUtils,
+      # ServiceController, …); they only run here, against the real flavor. Before this step they
+      # weren't run anywhere, and NetworkUtilsTest had silently stopped compiling.
+      - name: Unit tests (Robolectric / mocked Android)
+        run: ./gradlew ${{ matrix.test_task }} --stacktrace
+
+      - name: Upload unit test report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: unit-test-report-${{ matrix.flavor }}
+          path: app/build/reports/tests/
+          retention-days: 30
+          if-no-files-found: ignore
 
       - name: Lint and build debug APKs
         run: ./gradlew ${{ matrix.lint_task }} ${{ matrix.assemble_task }} --stacktrace

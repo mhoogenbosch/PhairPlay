@@ -47,8 +47,9 @@ class StreamingScreen @JvmOverloads constructor(
     // The SurfaceView that provides the hardware-accelerated rendering surface
     private val surfaceView: SurfaceView = SurfaceView(context)
 
-    // The Surface is created asynchronously by SurfaceView — stored here when ready
-    private var surface: Surface? = null
+    // The Surface is created asynchronously by SurfaceView — stored here when ready. Volatile: the
+    // mirror decoder thread polls it (MirrorStreamServer.checkSurface).
+    @Volatile private var surface: Surface? = null
 
     // Optional debug HUD (Settings → "Debug overlay"), drawn on top of the video.
     private val debugView = TextView(context).apply {

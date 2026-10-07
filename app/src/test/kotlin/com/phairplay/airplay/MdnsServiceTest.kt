@@ -137,20 +137,31 @@ class MdnsServiceTest {
     }
 
     /**
-     * Test: restart() calls stop then start (2 unregistrations + 2 registrations).
+     * Test: restart() unregisters both services and re-registers them once NsdManager has
+     * confirmed both unregistrations.
      *
-     * WHY: Restart must fully tear down and re-advertise so the device name
-     * change from Settings takes effect immediately.
+     * WHY: Restart must fully tear down and re-advertise so the device name change from Settings
+     * takes effect. Since mh.11 the re-registration waits for the unregistration callbacks (a
+     * registration racing an in-flight unregistration escalated the name to "(2)"), so the test
+     * delivers those callbacks the way NsdManager would.
      */
     @Test
     fun `restart unregisters then re-registers services`() {
+        val unregistered = mutableListOf<NsdManager.RegistrationListener>()
+        every { mockNsdManager.unregisterService(capture(unregistered)) } returns Unit
         val service = MdnsService(mockContext)
         service.start()
         service.restart()
 
-        // After restart: stop (2 unregisters) + start (2 registers) = 4 register calls total
-        // But first start = 2, restart start = 2 more
-        verify(atLeast = 4) {
+        // Nothing re-registers while the unregistrations are still pending.
+        verify(exactly = 2) {
+            mockNsdManager.registerService(any(), NsdManager.PROTOCOL_DNS_SD, any())
+        }
+        assertEquals(2, unregistered.size)
+        unregistered.toList().forEach { it.onServiceUnregistered(mockk(relaxed = true)) }
+
+        // First start = 2, restart = 2 more.
+        verify(exactly = 4) {
             mockNsdManager.registerService(any(), NsdManager.PROTOCOL_DNS_SD, any())
         }
     }

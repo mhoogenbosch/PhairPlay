@@ -418,7 +418,8 @@ class MdnsService(
             retryOrFail(serviceLabel, errorCode = -2, attempt = attempt, retry = retry)
             return
         }
-        armRegistrationWatchdog(serviceLabel, listener, serviceInfo.serviceName, attempt, retry)
+        // serviceName is only logged; `?:` keeps a stubbed NsdServiceInfo (JVM unit tests) from NPE-ing.
+        armRegistrationWatchdog(serviceLabel, listener, serviceInfo.serviceName ?: serviceLabel, attempt, retry)
     }
 
     /**

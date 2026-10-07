@@ -13,7 +13,58 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+---
+
+## [1.1.0-mh.12] - 2026-10-07
+
+Fixes picked from a review of all 39 forks of mazer666/PhairPlay. Each was re-implemented on this
+fork's code (none cherry-picks cleanly); credit to the forks named below.
+
+### Fixed
+- **Black mirror picture after Home or the screensaver, with audio still playing.** Two gaps,
+  together (idea: RajaRakshith/PhairPlay):
+  - When the video decoder hit an error it threw away the cached SPS/PPS and waited for new ones —
+    but the iPhone only sends those at session start or on a rotation/resolution change, so the
+    picture stayed black for the rest of the session. It now rebuilds from the cached SPS/PPS
+    (at most 5 times in a row before falling back to the old behaviour).
+  - The surface check only ran when a frame arrived and only compared object identity, but
+    `SurfaceHolder.getSurface()` returns the same object after the surface is recreated. The
+    decoder thread now checks on every poll (200 ms), also on `Surface.isValid`, and rebinds as
+    soon as the surface is back.
+- **A sender that vanished mid-handshake blocked the receiver until a restart** (idea: 2archiver/Hearth).
+  The RTSP server serves one control connection at a time and had no read timeout, so a phone that
+  dropped off Wi-Fi during pairing kept port 7000 occupied: the TV stayed visible in AirPlay pickers
+  but no one could connect. The control socket now times out after 120 s of silence until a stream
+  is set up; established sessions are unaffected.
+- **Overlay observers piled up** (idea: pdmashkov/AirPlayer). Every return to the app re-bound the
+  service and added 4 more state collectors that lived until the Activity was destroyed. The
+  previous set is now cancelled first.
+- **The surface provider was cleared on every `onStop`** (same source), forcing a decoder teardown and
+  a keyframe wait even when the surface survived a short stop. It is now only cleared when the
+  Activity is finishing.
+- **`GET /info` reported the Android system name** (e.g. "Nokia Streaming Box 8010") instead of the
+  configured/advertised name (idea: 2archiver/Hearth). It now returns the name mDNS registered.
+- **RTSP header names are matched case-insensitively** (idea: 2archiver/Hearth). A lower-case
+  `content-length` used to leave the body in the socket and desync the connection.
+- **Zero-length mirror packets no longer end the mirror** (idea: 2archiver/Hearth). Type 2 is an empty
+  heartbeat; `payloadSize == 0` was treated as corrupt and stopped the stream.
+- **libalac is no longer fed once a legacy audio stream is muted** for a bad key (idea:
+  prowsejeremy/PhairPlay) — garbage input can crash the native decoder.
+
+### Changed
+- **Mirror sessions show the sender's name** (e.g. "Anna's iPhone") from the SETUP plist instead of
+  the generic "AirPlay" (idea: 2archiver/Hearth).
+- **Audio-only playback (iPhone music: realtime ALAC / AAC-LC) is steadier** (idea:
+  prowsejeremy/PhairPlay): ~200 ms pre-roll before `play()`, a 2× AudioTrack buffer and the playback
+  thread at `THREAD_PRIORITY_URGENT_AUDIO`. Mirroring audio (AAC-ELD) keeps the minimum buffer and
+  no pre-roll, so lip-sync is unchanged.
+
 ### CI
+- The Android job now also runs `:app:test<Flavor>DebugUnitTest` (idea: Matej-Hajek/PhairPlayPhone).
+  Those tests (MdnsService, NetworkUtils, …) are excluded from the JVM test-runner and were not run
+  anywhere: `NetworkUtilsTest` no longer compiled since the deviceid change in mh.3, and
+  `MdnsServiceTest` failed on a stubbed `NsdServiceInfo` and on mh.11's asynchronous restart. Both
+  fixed.
 - GitHub Actions bumped to their current majors — `actions/checkout@v7`, `actions/setup-java@v6`,
   `actions/upload-artifact@v7`, `android-actions/setup-android@v4` — clearing the Node.js 20 and
   setup-java v4 deprecation warnings on every job. No effect on the APK (JDK stays Temurin 17).

@@ -28,6 +28,7 @@ import com.phairplay.ui.PhotoScreen
 import com.phairplay.ui.PinScreen
 import com.phairplay.ui.SettingsFragment
 import com.phairplay.ui.StreamingScreen
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -84,6 +85,11 @@ class MainActivity : AppCompatActivity() {
     // "the app is only up because a sender connected" (retreat when it ends) apart from "the user is
     // actively using the app" (stay put). Reset each time the Activity goes to the background.
     private var userInteractedThisForeground = false
+
+    // Collectors started by [observeOverlayState]. Every onStart re-binds and onServiceConnected
+    // runs again; without cancelling the previous set, each Home→back stint stacked 4 more
+    // collectors (lifecycleScope only cancels them in onDestroy), all calling updateOverlay().
+    private val overlayJobs = mutableListOf<Job>()
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -180,8 +186,12 @@ class MainActivity : AppCompatActivity() {
         super.onStop()
         // Fresh foreground stint next time — forget any interaction from this one.
         userInteractedThisForeground = false
-        // Clear surface reference before unbinding to avoid holding a dead Surface
-        service?.setVideoSurfaceProvider { null }
+        // Keep the surface provider while merely stopped (screensaver, Home): it is a live lookup
+        // that already returns null once the Surface is destroyed, and the mirror decoder re-checks
+        // validity itself. Clearing it here forced a decoder teardown + keyframe wait even when the
+        // Surface survived a short stop. Only drop it when this Activity is really going away, so
+        // the service never keeps a finished Activity alive.
+        if (isFinishing) service?.setVideoSurfaceProvider { null }
         if (isBound) {
             unbindService(serviceConnection)
             isBound = false
@@ -422,30 +432,33 @@ class MainActivity : AppCompatActivity() {
      * Observes [PhairPlayService.airPlayState] and [PhairPlayService.photoFrame]
      * and shows the appropriate full-screen overlay.
      *
-     * Called once after the service is bound. The coroutine is automatically cancelled
-     * by [lifecycleScope] when the Activity stops.
+     * Called after every (re)bind. Replaces the collectors of a previous bind rather than adding
+     * to them; they deliberately keep running while stopped, so a session that ends in the
+     * background still resets the auto-open bookkeeping in [updateOverlay].
      */
     private fun observeOverlayState() {
         val svc = service ?: return
-        lifecycleScope.launch {
+        overlayJobs.forEach { it.cancel() }
+        overlayJobs.clear()
+        overlayJobs += lifecycleScope.launch {
             svc.airPlayState.collectLatest { state ->
                 currentAirPlayState = state
                 updateOverlay()
             }
         }
-        lifecycleScope.launch {
+        overlayJobs += lifecycleScope.launch {
             svc.photoFrame.collectLatest { frame ->
                 currentPhotoFrame = frame
                 updateOverlay()
             }
         }
-        lifecycleScope.launch {
+        overlayJobs += lifecycleScope.launch {
             svc.nowPlaying.collectLatest { info ->
                 currentNowPlaying = info
                 updateOverlay()
             }
         }
-        lifecycleScope.launch {
+        overlayJobs += lifecycleScope.launch {
             svc.pairingPin.collectLatest { pin ->
                 currentPin = pin
                 updateOverlay()
