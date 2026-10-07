@@ -23,7 +23,14 @@ its releases as `<semver>-mh.<n>` on top of the upstream
   launcher. Stop mirroring on the sender instead. On the now-playing card and photos Back works as
   before.
 
-### Added — YouTube-app video, phase 1 (diagnostics only)
+### Added — AirPlay-video diagnostics (YouTube app)
+
+Finding (iPhone, iOS 27.0.1, AirPlay 980.77.1): the YouTube app first plays an audio-only session,
+then reconnects and asks `POST /fp-setup2` — a FairPlay variant no open-source receiver implements
+(UxPlay answers 421 too). It never reaches `/play` or `/reverse`, so YouTube video can't be supported
+for now; UxPlay's HLS path is documented working with iOS 26 (AirPlay 960.x). The changes below stop
+the hang and keep the exchange visible should a future iOS/YouTube version take another route.
+
 - **A second connection while a session is active is inspected instead of refused with 503.**
   AirPlay video from the YouTube app opens one for `POST /reverse` (PTTH) — the channel a receiver
   uses to fetch the HLS playlists from the iPhone (FCUP). It now gets `101 Switching Protocols`
