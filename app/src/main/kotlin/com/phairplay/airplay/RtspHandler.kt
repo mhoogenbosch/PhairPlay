@@ -572,7 +572,12 @@ open class RtspHandler(
     private fun handleServerInfo(request: RtspRequest): RtspResponse {
         val info = mapOf(
             "deviceid" to com.phairplay.util.NetworkUtils.getMacAddress(context),
-            "features" to 0x1E5A7FFFF7L,
+            // GET /server-info is only asked on the AirPlay *video* path (YouTube app). Returning the
+            // full mirroring feature set here (0x1E5A7FFFF7, incl. the high word) made the iPhone go
+            // for POST /fp-setup2 — a FairPlay variant nobody open-source implements — and stall.
+            // UxPlay, whose HLS path works, answers the classic AirPlay-video feature set 0x27F:
+            // video, photo, FairPlay video, volume control, HLS, slideshow, bit 6, audio (bit 9).
+            "features" to SERVER_INFO_FEATURES,
             "model" to "AppleTV5,3",
             "protovers" to "1.1",
             "srcvers" to "220.68",
@@ -1133,6 +1138,7 @@ open class RtspHandler(
         private const val RTSP_PORT = 7000
         /** Idle read timeout on the control socket until a stream is SETUP (see handleClient). */
         private const val PRE_SESSION_IDLE_TIMEOUT_MS = 120_000
+        private const val SERVER_INFO_FEATURES = 0x27FL
 
         // SRP PIN access control. macOS's AirPlay code-entry field is exactly 4 digits, so the PIN
         // must be 4 digits to be enterable. A 4-digit space is low-entropy, so the load-bearing
