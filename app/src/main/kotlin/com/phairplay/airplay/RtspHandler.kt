@@ -96,6 +96,10 @@ open class RtspHandler(
     @Volatile
     private var activeClient: Socket? = null
 
+    /** The sender's PTTH reverse channel (`POST /reverse`), while open. Phase 1: logged only. */
+    @Volatile
+    private var reverseSocket: Socket? = null
+
     @Volatile
     private var running = false
 
@@ -152,6 +156,7 @@ open class RtspHandler(
         running = false
         try {
             activeClient?.close()
+            reverseSocket?.close()
             serverSocket?.close()
         } catch (e: Exception) {
             Logger.e("Error closing RTSP sockets (non-fatal)", e)
@@ -196,9 +201,12 @@ open class RtspHandler(
                 Logger.i("New client connected: ${clientSocket.inetAddress.hostAddress}")
 
                 if (activeClient != null && !activeClient!!.isClosed) {
-                    Logger.w("Rejecting second client — already streaming")
-                    sendServiceUnavailable(clientSocket)
-                    clientSocket.close()
+                    // A second connection while one is active. AirPlay video from the YouTube app
+                    // opens one for `POST /reverse` (PTTH): the channel the receiver later uses to
+                    // ask the iPhone for HLS playlists (FCUP). Handle it on its own coroutine so it
+                    // never blocks or touches the primary session; anything else still gets 503.
+                    Logger.i("Second client ${clientSocket.inetAddress.hostAddress} while one is active — inspecting")
+                    scope.launch(Dispatchers.IO) { handleSecondaryClient(clientSocket) }
                     continue
                 }
 
@@ -288,6 +296,102 @@ open class RtspHandler(
         }
     }
 
+    /**
+     * Serves a connection opened while [activeClient] is busy. Stateless on purpose: it must not
+     * touch the per-session fields (pairing, FairPlay, CSeq) of the primary connection.
+     *  - `POST /reverse` → `101 Switching Protocols` (PTTH/1.0). The socket then belongs to the
+     *    receiver as an HTTP *client* channel; phase 1 only logs what the sender sends on it.
+     *  - `GET /info` → the normal info plist.
+     *  - anything else → logged, then 503 as before.
+     */
+    private fun handleSecondaryClient(socket: Socket) {
+        val tag = "Secondary[${socket.inetAddress.hostAddress}:${socket.port}]"
+        try {
+            socket.soTimeout = PRE_SESSION_IDLE_TIMEOUT_MS
+            val input = socket.getInputStream()
+            val output = socket.getOutputStream()
+            val reader = RtspRequestReader(maxMessageBytes = MAX_MESSAGE_BYTES, maxPhotoBytes = PhotoHandler.MAX_PHOTO_BYTES)
+            while (running && !socket.isClosed) {
+                val request = reader.read(input) ?: break
+                Logger.i("$tag ${request.method} ${request.uri} ${request.protocol} headers=${request.headers}" +
+                    " body=${describeBody(request)}")
+                when {
+                    request.method == "POST" && request.uri.substringBefore("?") == "/reverse" -> {
+                        val head = "HTTP/1.1 101 Switching Protocols\r\n" +
+                            "Date: ${httpDate()}\r\n" +
+                            "Upgrade: ${request.headers["Upgrade"] ?: "PTTH/1.0"}\r\n" +
+                            "Connection: Upgrade\r\n\r\n"
+                        output.write(head.toByteArray(Charsets.US_ASCII)); output.flush()
+                        Logger.i("$tag reverse channel open (purpose=${request.headers["X-Apple-Purpose"]})")
+                        socket.soTimeout = 0
+                        reverseSocket = socket
+                        logReverseTraffic(tag, input)
+                        return
+                    }
+                    request.method == "GET" && request.uri.substringBefore("?") == "/info" ->
+                        sendResponse(output, handleInfo(request), cseq = request.headers["CSeq"]?.toIntOrNull() ?: 0)
+                    else -> {
+                        sendResponse(output, RtspResponse(503, "Service Unavailable", protocol = request.responseProtocol()),
+                            cseq = request.headers["CSeq"]?.toIntOrNull() ?: 0)
+                        break
+                    }
+                }
+            }
+        } catch (e: java.net.SocketTimeoutException) {
+            Logger.w("$tag idle — closing")
+        } catch (e: Exception) {
+            if (running) Logger.w("$tag ended: ${e.message}")
+        } finally {
+            if (reverseSocket === socket) reverseSocket = null
+            runCatching { socket.close() }
+            Logger.i("$tag closed")
+        }
+    }
+
+    /** Phase-1 diagnostics: log whatever the sender writes on the reverse (PTTH) channel. */
+    private fun logReverseTraffic(tag: String, input: java.io.InputStream) {
+        val buf = ByteArray(4096)
+        while (running) {
+            val n = input.read(buf)
+            if (n == -1) break
+            val text = String(buf, 0, minOf(n, 600), Charsets.ISO_8859_1).replace("\r", "\\r").replace("\n", "\\n")
+            Logger.i("$tag reverse ← $n B: $text")
+        }
+    }
+
+    /** One-line, size-bounded description of a request body for the phase-1 protocol log. */
+    private fun describeBody(request: RtspRequest): String {
+        if (request.bodyBytes.isEmpty()) return "-"
+        if (request.isPlistBody()) {
+            return runCatching { describePlist(PlistCodec.decode(request.bodyBytes)) }
+                .getOrElse { "${request.bodyBytes.size}B plist (undecodable: ${it.message})" }
+        }
+        val text = request.body.take(400).replace("\r", "\\r").replace("\n", "\\n")
+        return "${request.bodyBytes.size}B '$text'"
+    }
+
+    private fun describePlist(value: Any?, depth: Int = 0): String = when (value) {
+        is Map<*, *> -> if (depth > 4) "{…}" else value.entries.joinToString(", ", "{", "}") { (k, v) -> "$k=${describePlist(v, depth + 1)}" }
+        is List<*> -> if (depth > 4) "[…]" else value.take(10).joinToString(", ", "[", if (value.size > 10) ", …${value.size}]" else "]") { describePlist(it, depth + 1) }
+        is ByteArray -> describeBytes(value)
+        is String -> if (value.length > 300) "'${value.take(300)}…'(${value.length})" else "'$value'"
+        else -> value.toString()
+    }
+
+    /** Bytes inside a plist: nested bplists and text (e.g. an m3u8 playlist) are shown, not just sized. */
+    private fun describeBytes(b: ByteArray): String {
+        if (b.size >= 8 && String(b, 0, 6, Charsets.US_ASCII) == "bplist") {
+            return runCatching { "bplist" + describePlist(PlistCodec.decode(b), 1) }.getOrDefault("${b.size}B bplist")
+        }
+        val printable = b.take(200).count { it in 9..13 || it in 32..126 }
+        return if (printable >= minOf(b.size, 200) * 9 / 10) {
+            "${b.size}B '" + String(b, 0, minOf(b.size, 600), Charsets.UTF_8).replace("\n", "\\n") + "'"
+        } else "${b.size}B"
+    }
+
+    private fun httpDate(): String = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", java.util.Locale.US)
+        .apply { timeZone = java.util.TimeZone.getTimeZone("GMT") }.format(java.util.Date())
+
     private fun routeRequest(request: RtspRequest): RtspResponse {
         Logger.d("RTSP ${request.method} ${request.uri}")
         // Senders attach their DACP reverse-control identity to most requests — capture it so the TV
@@ -334,6 +438,10 @@ open class RtspHandler(
         "/pair-pin-start" -> handlePairPinStart(request)
         "/pair-verify" -> handlePairVerify(request)
         "/fp-setup"    -> handleFpSetup(request)
+        // FairPlay variant the YouTube app asks for before AirPlay video. We (like UxPlay) only
+        // implement fp-setup v3. A 501 left the iPhone waiting forever on an open connection; UxPlay
+        // answers 421 Misdirected Request, after which the sender carries on without it.
+        "/fp-setup2"   -> handleFpSetup2(request)
         "/feedback"    -> handleFeedback(request)
         "/audioMode"   -> RtspResponse(200, "OK", protocol = request.responseProtocol())
         // AirPlay video URL mode (non-mirroring): play a URL + drive transport.
@@ -341,14 +449,38 @@ open class RtspHandler(
         "/rate"        -> handleVideoRate(request)
         "/scrub"       -> handleVideoScrubPost(request)
         "/stop"        -> handleVideoStop(request)
+        // Sender-mediated HLS (YouTube app): the sender answers our FCUP requests here. Phase 1
+        // only logs them so the real exchange can be studied before playback is built.
+        "/action"      -> handleAction(request)
         else           -> handleUnknownInternal(request)
     }
 
     // ─── AirPlay video URL mode (POST /play, /rate, /scrub, /stop; GET /playback-info, /scrub) ──
 
     /** POST /play — a media URL to play (binary/XML plist or legacy text body). */
+    private fun handleFpSetup2(request: RtspRequest): RtspResponse {
+        val version = request.bodyBytes.getOrNull(4)?.toInt()?.and(0xFF)
+        Logger.w("POST /fp-setup2 (${request.bodyBytes.size}B, FairPlay version 0x%02x) — unsupported, answering 421"
+            .format(version ?: 0))
+        return RtspResponse(421, "Misdirected Request", contentType = "application/x-apple-binary-plist",
+            protocol = request.responseProtocol())
+    }
+
+    private fun handleAction(request: RtspRequest): RtspResponse {
+        Logger.i("POST /action ${describeBody(request)}")
+        return RtspResponse(200, "OK", protocol = request.responseProtocol())
+    }
+
     private fun handleVideoPlay(request: RtspRequest): RtspResponse {
+        Logger.i("POST /play headers=${request.headers} body=${describeBody(request)}")
         val (url, start) = parsePlayBody(request)
+        if (url != null && url.startsWith("mlhls://")) {
+            // YouTube-app video: the playlist must be fetched from the sender over the reverse
+            // channel (FCUP), which phase 1 does not do yet. Acknowledge so the sender proceeds
+            // and its follow-up traffic gets logged; don't hand an unplayable URL to MediaPlayer.
+            Logger.w("POST /play: sender-mediated HLS ($url) — not playable yet (FCUP is phase 2)")
+            return RtspResponse(200, "OK", protocol = request.responseProtocol())
+        }
         if (url.isNullOrBlank()) {
             Logger.w("POST /play with no Content-Location")
             return RtspResponse(400, "Bad Request", protocol = request.responseProtocol())
@@ -970,7 +1102,7 @@ open class RtspHandler(
         )
     }
 
-    private fun sendResponse(outputStream: OutputStream, response: RtspResponse) {
+    private fun sendResponse(outputStream: OutputStream, response: RtspResponse, cseq: Int = currentCSeq) {
         // Binary-safe: build the header block as ASCII, then write the raw body bytes.
         // Content-Length must be the BYTE length (not String.length) so binary plists,
         // FairPlay payloads, and encrypted bodies are framed correctly.
@@ -978,7 +1110,7 @@ open class RtspHandler(
         val head = StringBuilder()
         head.append("${response.protocol} ${response.statusCode} ${response.statusMessage}\r\n")
         if (response.protocol.startsWith("RTSP")) {
-            head.append("CSeq: $currentCSeq\r\n")
+            head.append("CSeq: $cseq\r\n")
         }
         head.append("Server: AirTunes/220.68\r\n")
         response.contentType?.let { head.append("Content-Type: $it\r\n") }
@@ -996,15 +1128,6 @@ open class RtspHandler(
         outputStream.flush()
     }
 
-    private fun sendServiceUnavailable(socket: Socket) {
-        try {
-            val response = "RTSP/1.0 503 Service Unavailable\r\nCSeq: 0\r\n\r\n"
-            socket.outputStream.write(response.toByteArray())
-            socket.outputStream.flush()
-        } catch (e: Exception) {
-            Logger.e("Error sending 503 response", e)
-        }
-    }
 
     companion object {
         private const val RTSP_PORT = 7000

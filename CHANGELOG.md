@@ -15,6 +15,35 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.14] - 2026-10-07
+
+### Changed
+- **Back is ignored while screen mirroring** (idea: RajaRakshith/PhairPlay). It used to close the
+  app while the session kept running — the iPhone still said "mirroring", the TV showed the
+  launcher. Stop mirroring on the sender instead. On the now-playing card and photos Back works as
+  before.
+
+### Added — AirPlay-video diagnostics (YouTube app)
+
+Finding (iPhone, iOS 27.0.1, AirPlay 980.77.1): the YouTube app first plays an audio-only session,
+then reconnects and asks `POST /fp-setup2` — a FairPlay variant no open-source receiver implements
+(UxPlay answers 421 too). It never reaches `/play` or `/reverse`, so YouTube video can't be supported
+for now; UxPlay's HLS path is documented working with iOS 26 (AirPlay 960.x). The changes below stop
+the hang and keep the exchange visible should a future iOS/YouTube version take another route.
+
+- **A second connection while a session is active is inspected instead of refused with 503.**
+  AirPlay video from the YouTube app opens one for `POST /reverse` (PTTH) — the channel a receiver
+  uses to fetch the HLS playlists from the iPhone (FCUP). It now gets `101 Switching Protocols`
+  and everything the sender sends on it is logged; `GET /info` is answered; anything else still
+  gets 503. The secondary connection never touches the primary session's state.
+- **`POST /fp-setup2` is answered with `421 Misdirected Request`** instead of `501`. The YouTube app
+  asks for this FairPlay variant before AirPlay video; with 501 it waited forever on an open
+  connection (seen on the Nokia: the video hung on "connecting"). UxPlay can't do fp-setup2 either
+  and answers 421, after which the sender continues.
+- **`POST /play` and `POST /action` are logged in full** (plists decoded, nested plists and
+  playlists shown). A `mlhls://` (sender-mediated HLS) URL is acknowledged but not handed to the
+  player, which can't play it — playback is phase 2.
+
 ## [1.1.0-mh.13] - 2026-10-07
 
 ### Fixed
