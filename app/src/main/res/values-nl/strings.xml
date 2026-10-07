@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    strings.xml — Nederlands (nl)
+
+    Same keys as res/values/strings.xml. Product and protocol names (PhairPlay, AirPlay, Miracast,
+    Google Cast, Wi-Fi) stay untranslated, as in the German and French files.
+-->
+<resources>
+
+    <!-- ── Navigation ──────────────────────────────────────────── -->
+    <string name="nav_home">Start</string>
+    <string name="nav_settings">Instellingen</string>
+
+    <!-- ── HomeFragment ────────────────────────────────────────── -->
+    <string name="home_title">Klaar voor verbindingen</string>
+    <string name="home_device_visible_as">Zichtbaar als: %1$s</string>
+
+    <!-- ── Protocol names ──────────────────────────────────────── -->
+    <string name="protocol_airplay">AirPlay</string>
+    <string name="protocol_miracast">Miracast</string>
+    <string name="protocol_cast">Cast</string>
+
+    <!-- ── Protocol states ─────────────────────────────────────── -->
+    <string name="protocol_state_disabled">Uitgeschakeld</string>
+    <string name="protocol_state_advertising">Zichtbaar</string>
+    <string name="protocol_state_connected">Verbonden</string>
+    <string name="protocol_state_error">Fout</string>
+
+    <!-- ── Protocol card detail lines ──────────────────────────── -->
+    <string name="protocol_detail_disabled">Inschakelen via Instellingen</string>
+    <string name="protocol_detail_waiting">Wachten op een apparaat…</string>
+    <string name="protocol_detail_connected">Streamt vanaf %1$s</string>
+    <string name="protocol_detail_error">Controleer de wifi-instellingen</string>
+
+    <!-- ── Service states ──────────────────────────────────────── -->
+    <string name="service_state_running">Actief</string>
+    <string name="service_state_stopped">Gestopt</string>
+    <string name="service_state_restarting">Herstarten…</string>
+    <string name="service_state_error">Fout</string>
+
+    <!-- ── Section headers ─────────────────────────────────────── -->
+    <string name="section_protocols">Protocollen</string>
+    <string name="section_controls">Servicebeheer</string>
+
+    <!-- ── Control buttons ─────────────────────────────────────── -->
+    <string name="action_start">Starten</string>
+    <string name="action_stop">Stoppen</string>
+    <string name="action_restart">Herstarten</string>
+
+    <!-- ── Notification ────────────────────────────────────────── -->
+    <string name="notification_channel_name">PhairPlay-service</string>
+    <string name="notification_channel_description">Vaste melding voor de AirPlay/Miracast/Cast-ontvanger</string>
+    <string name="notification_status_running">Ontvanger actief — zichtbaar op het netwerk</string>
+    <string name="notification_status_stopped">Ontvanger gestopt</string>
+    <string name="notification_status_streaming">Streamt vanaf %1$s</string>
+
+    <!-- ── Settings section headers ────────────────────────────── -->
+    <string name="settings_section_display">Weergave</string>
+    <string name="settings_section_protocols">Protocollen</string>
+    <string name="settings_section_airplay">AirPlay</string>
+    <string name="settings_section_service">Service</string>
+    <string name="settings_section_developer">Ontwikkelaar</string>
+    <string name="settings_section_about">Over</string>
+
+    <!-- ── Settings row labels ─────────────────────────────────── -->
+    <string name="setting_display_name">Apparaatnaam</string>
+    <string name="setting_display_name_system_default">Systeemnaam van het apparaat</string>
+    <string name="setting_display_name_dialog_hint">Leeg laten voor de systeemnaam</string>
+    <string name="setting_display_name_reset">Standaard herstellen</string>
+    <string name="setting_display_name_collision_note">Geregistreerd als: %1$s</string>
+    <string name="setting_airplay_enabled">AirPlay-ontvanger</string>
+    <string name="setting_airplay_subtitle">Verbindingen van iPhone, iPad en Mac accepteren</string>
+    <string name="setting_miracast_enabled">Miracast-ontvanger</string>
+    <string name="setting_miracast_subtitle">Verbindingen van Windows en Android accepteren</string>
+    <string name="setting_cast_enabled">Google Cast-ontvanger</string>
+    <string name="setting_cast_subtitle">Verbindingen van Chrome en Android accepteren</string>
+    <string name="setting_mirror_audio">Geluid bij synchroniseren</string>
+    <string name="setting_mirror_audio_subtitle">Het geluid van het apparaat afspelen tijdens synchroniseren</string>
+    <string name="setting_pin_auth">Koppelcode vereisen</string>
+    <string name="setting_pin_auth_subtitle">Toon een code op de tv die moet worden ingevoerd om te verbinden</string>
+    <string name="setting_start_on_boot">Starten bij opstarten</string>
+    <string name="setting_debug_overlay">Debug-overlay</string>
+    <string name="setting_debug_overlay_subtitle">Live fps, wachtrij en gemiste frames tonen tijdens streamen</string>
+    <string name="setting_force_high_res">Hogere resolutie (1440p)</string>
+    <string name="setting_force_high_res_subtitle">Scherper beeld; kost meer rekenkracht. Uit = 1080p</string>
+    <string name="setting_version">Versie</string>
+    <string name="setting_reset_defaults">Standaardinstellingen herstellen</string>
+
+    <!-- ── Waiting screen ──────────────────────────────────────── -->
+    <string name="waiting_title">Klaar voor AirPlay</string>
+    <string name="waiting_subtitle">Open AirPlay op je apparaat en kies deze tv</string>
+    <string name="waiting_device_label">Dit apparaat:</string>
+    <string name="streaming_hint">Druk op Terug om het streamen te stoppen</string>
+
+    <!-- ── Now playing ─────────────────────────────────────────── -->
+    <string name="now_playing_audio">Audio wordt afgespeeld</string>
+    <string name="now_playing_from">Audio van %1$s</string>
+
+    <!-- ── Pairing PIN ─────────────────────────────────────────── -->
+    <string name="pairing_pin_title">AirPlay-koppelcode</string>
+    <string name="pairing_pin_hint">Voer deze code in op je apparaat om te verbinden</string>
+
+    <!-- ── Error messages ──────────────────────────────────────── -->
+    <string name="error_network_unavailable">Geen wifi-verbinding. Maak verbinding met wifi.</string>
+    <string name="error_mdns_failed">Kan niet zichtbaar worden op het netwerk.</string>
+    <string name="error_wifi_p2p_unavailable">Miracast wordt niet ondersteund op dit apparaat.</string>
+    <string name="error_cast_unavailable">Google Cast vereist Google Play-services (niet beschikbaar op dit apparaat).</string>
+
+    <!-- ── Overlay permission banner ───────────────────────────── -->
+    <string name="overlay_permission_message">Synchroniseren kan niet in beeld komen: PhairPlay heeft de toestemming “Weergeven vóór andere apps” nodig om op een tv naar de voorgrond te komen. Geef die toestemming en kom dan hier terug.</string>
+    <string name="overlay_permission_button">Toestemming geven</string>
+
+    <!-- ── Accessibility ───────────────────────────────────────── -->
+    <string name="content_desc_airplay_icon">AirPlay-protocolpictogram</string>
+    <string name="content_desc_miracast_icon">Miracast-protocolpictogram</string>
+    <string name="content_desc_cast_icon">Google Cast-protocolpictogram</string>
+    <string name="content_desc_status_dot">Statusindicator</string>
+
+</resources>

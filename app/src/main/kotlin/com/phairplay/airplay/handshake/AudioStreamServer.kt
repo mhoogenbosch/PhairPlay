@@ -98,6 +98,7 @@ class AudioStreamServer(
     private val reorder = HashMap<Int, ByteArray>()   // seq → decrypted-pending RTP payload
     private var nextSeq = -1                            // next seq to release in order (-1 = uninit)
     private var maxSeq = -1                             // highest seq seen (for gap detection)
+    private var minAcceptableSeq = -1                   // set by flush(): drop stale pre-flush packets
     private var resendCtr = 0                           // sequence counter for our resend requests
     @Volatile private var senderCtrlAddr: java.net.SocketAddress? = null
     @Volatile private var dupCount = 0
@@ -198,12 +199,22 @@ class AudioStreamServer(
      * cross-thread handoff. Thread-safe: the reorder buffer + dedup are accessed under [reorderLock].
      */
     private fun handleRtpPacket(src: ByteArray, offset: Int, length: Int) {
-        if (length <= RTP_HEADER) return
+        if (length < RTP_HEADER) return
         val seq = ((src[offset + 2].toInt() and 0xFF) shl 8) or (src[offset + 3].toInt() and 0xFF)
+        val payloadLen = length - RTP_HEADER
         // RAOP RTP: 12-byte header, then AES-128-CBC-encrypted audio payload (copied out of src).
-        val payload = src.copyOfRange(offset + RTP_HEADER, offset + length)
+        // Protocol markers (header-only packet, AAC-ELD no-data 00 68 34 00, ALAC format packet)
+        // carry no audio but DO occupy a sequence number: keep them in the sequence as an empty slot
+        // so they don't read as a gap (→ needless resend request + up to MAX_REORDER_HOLD packets of
+        // added hold), and never hand them to the decoder.
+        val payload = if (isNoDataRtpPayload(src, offset + RTP_HEADER, payloadLen, codecType)) EMPTY
+            else src.copyOfRange(offset + RTP_HEADER, offset + length)
         var resend: IntArray? = null
         synchronized(reorderLock) {
+            if (minAcceptableSeq >= 0) {
+                if (seqDiff(seq, minAcceptableSeq) < 0) return   // in flight from before the FLUSH
+                minAcceptableSeq = -1
+            }
             if (isDuplicateSeq(seq)) { dupCount++; return }
             resend = enqueueInOrder(seq, payload)
         }
@@ -240,9 +251,30 @@ class AudioStreamServer(
     private fun releaseContiguous() {
         while (true) {
             val p = reorder.remove(nextSeq) ?: break
-            if (!frameQueue.offer(p)) { frameQueue.poll(); frameQueue.offer(p); qDropCount++ }
+            if (p.isNotEmpty() && !frameQueue.offer(p)) { frameQueue.poll(); frameQueue.offer(p); qDropCount++ }
             nextSeq = (nextSeq + 1) and 0xFFFF
         }
+    }
+
+    /**
+     * RTSP FLUSH (pause / seek / track skip in the sender): drop everything queued and re-anchor the
+     * sequence. Without this the receiver played up to ~1 s of stale audio after a skip, and the
+     * reorder state could treat the new stream position as a giant gap. [flushedSeq] is the first
+     * sequence number of the new audio (`RTP-Info: seq=`); packets before it that are still in flight
+     * are dropped. Safe from the RTSP thread: the queue is concurrent, the rest is under [reorderLock].
+     */
+    fun flush(flushedSeq: Int = -1) {
+        frameQueue.clear()
+        synchronized(reorderLock) {
+            reorder.clear()
+            seenSeqs.clear()
+            seenSeqSet.clear()
+            nextSeq = -1
+            maxSeq = -1
+            minAcceptableSeq = if (flushedSeq in 0..0xFFFF) flushedSeq else -1
+        }
+        StreamStats.audioQueue = 0
+        Logger.i("Audio: FLUSH — queue cleared${if (flushedSeq in 0..0xFFFF) ", resuming at seq $flushedSeq" else ""}")
     }
 
     /**
@@ -457,6 +489,23 @@ class AudioStreamServer(
 
         // Don't ask for an absurd resend range (a huge gap = a real stall, not a few lost packets).
         private const val MAX_RESEND_RANGE = 128
+
+        private val EMPTY = ByteArray(0)
+
+        /**
+         * True when an RTP audio payload is a protocol marker, not a decodable frame (UxPlay
+         * lib/raop_buffer.c / raop_rtp.c):
+         *  - header-only RTP packet (no payload),
+         *  - AAC-ELD no-data marker: 4-byte payload `00 68 34 00`,
+         *  - ALAC format-only packet: 32-byte payload (44-byte datagram) when the stream is ALAC.
+         */
+        internal fun isNoDataRtpPayload(src: ByteArray, payloadOffset: Int, payloadLen: Int, codecType: Int): Boolean {
+            if (payloadLen <= 0) return true
+            if (payloadLen == 4 && payloadOffset + 4 <= src.size &&
+                src[payloadOffset].toInt() == 0x00 && src[payloadOffset + 1].toInt() == 0x68 &&
+                src[payloadOffset + 2].toInt() == 0x34 && src[payloadOffset + 3].toInt() == 0x00) return true
+            return codecType == CT_ALAC && payloadLen == 32
+        }
 
         // Jitter buffer depth between the receive and playback threads (~1 s at 92 frames/s).
         private const val AUDIO_QUEUE_CAPACITY = 96

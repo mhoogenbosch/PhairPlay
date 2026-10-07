@@ -51,6 +51,8 @@ open class RtspHandler(
     private val onBufferedAudioStart: () -> Int = { 0 },
     /** Stops the buffered audio-only stream (type 103 TEARDOWN). */
     private val onBufferedAudioStop: () -> Unit = {},
+    /** RTSP FLUSH: drop queued audio; [nextSeq] = first RTP seq of the new audio, or -1 if absent. */
+    private val onAudioFlush: (nextSeq: Int) -> Unit = {},
     /** Sender volume change (AirPlay dB: −30…0, or ≤ −144 = mute) via SET_PARAMETER. */
     private val onVolume: (Float) -> Unit = {},
     /** Now-playing track metadata (DMAP) from SET_PARAMETER — any field may be null. */
@@ -911,8 +913,9 @@ open class RtspHandler(
         return RtspResponse(statusCode = 501, statusMessage = "Not Implemented", protocol = request.responseProtocol())
     }
 
-    /** Handles FLUSH — macOS requests we discard buffered media data (seek/pause). */
-    private fun handleFlush(@Suppress("UNUSED_PARAMETER") request: RtspRequest): RtspResponse {
+    /** Handles FLUSH — the sender discards buffered media (pause/seek/skip); so must we. */
+    private fun handleFlush(request: RtspRequest): RtspResponse {
+        onAudioFlush(parseRtpInfoSeq(request.headers["RTP-Info"]))
         return RtspResponse(statusCode = 200, statusMessage = "OK")
     }
 
@@ -1030,6 +1033,16 @@ open class RtspHandler(
         private const val DEFAULT_SENDER_NAME = "AirPlay Sender"
     }
 }
+
+/** `RTP-Info: seq=12345;rtptime=…` → 12345, or -1 when absent/malformed. */
+internal fun parseRtpInfoSeq(rtpInfo: String?): Int =
+    rtpInfo?.split(';', ',')
+        ?.map { it.trim() }
+        ?.firstOrNull { it.startsWith("seq=") }
+        ?.substringAfter("seq=")
+        ?.toIntOrNull()
+        ?.takeIf { it in 0..0xFFFF }
+        ?: -1
 
 private fun RtspRequest.isPhotoRequest(): Boolean =
     uri.substringBefore("?") == PhotoHandler.PHOTO_PATH

@@ -268,9 +268,10 @@ class AirPlayReceiver(
             onMirrorVideoStop = { stopMirrorVideo() },
             onBufferedAudioStart = { startBufferedAudio() },
             onBufferedAudioStop = { stopBufferedAudio() },
+            onAudioFlush = { nextSeq -> audioServer?.flush(nextSeq) },
             onVolume = { v -> audioServer?.setVolume(v) },
             onNowPlayingMetadata = { title, artist, album ->
-                npTitle = title; npArtist = artist; npAlbum = album
+                npTitle = title; npArtist = NowPlayingInfo.cleanArtist(artist); npAlbum = album
                 emitNowPlaying()
             },
             onArtwork = { bytes ->

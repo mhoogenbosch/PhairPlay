@@ -2,6 +2,8 @@ package com.phairplay.airplay.handshake
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -52,5 +54,20 @@ class AudioStreamServerTest {
     fun `pre-roll is zero for nonsense stream parameters`() {
         assertEquals(0, AudioStreamServer.prerollFrameCount(44100, 0))
         assertEquals(0, AudioStreamServer.prerollFrameCount(0, 352))
+    }
+
+    @Test
+    fun `protocol markers are recognised as no-data packets`() {
+        val eld = byteArrayOf(0x00, 0x68, 0x34, 0x00)
+        assertTrue(AudioStreamServer.isNoDataRtpPayload(eld, 0, 4, AudioStreamServer.CT_AAC_ELD))
+        assertTrue(AudioStreamServer.isNoDataRtpPayload(ByteArray(0), 0, 0, AudioStreamServer.CT_AAC_ELD))
+        assertTrue(AudioStreamServer.isNoDataRtpPayload(ByteArray(32), 0, 32, AudioStreamServer.CT_ALAC))
+    }
+
+    @Test
+    fun `real audio frames are not mistaken for markers`() {
+        assertFalse(AudioStreamServer.isNoDataRtpPayload(byteArrayOf(0x01, 0x68, 0x34, 0x00), 0, 4, AudioStreamServer.CT_AAC_ELD))
+        assertFalse(AudioStreamServer.isNoDataRtpPayload(ByteArray(32), 0, 32, AudioStreamServer.CT_AAC_ELD))
+        assertFalse(AudioStreamServer.isNoDataRtpPayload(ByteArray(300), 0, 300, AudioStreamServer.CT_ALAC))
     }
 }

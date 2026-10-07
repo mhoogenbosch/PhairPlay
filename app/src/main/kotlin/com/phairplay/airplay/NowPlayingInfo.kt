@@ -13,6 +13,16 @@ data class NowPlayingInfo(
     val album: String? = null,
     val artwork: ByteArray? = null,
 ) {
+    companion object {
+        // Spotify appends a "has a music video" marker to the artist it sends over AirPlay:
+        // "Lady Gaga, Bruno Mars • Video" / "OneRepublic • Video beschikbaar" (localised).
+        private val VIDEO_SUFFIX = Regex("\\s+•\\s+(video|vídeo)\\b.*$", RegexOption.IGNORE_CASE)
+
+        /** Strips sender decorations from the artist line; null/blank stays null. */
+        fun cleanArtist(raw: String?): String? =
+            raw?.replace(VIDEO_SUFFIX, "")?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
     /** True when the sender supplied at least a track title (vs. a bare "audio is playing" state). */
     val hasMetadata: Boolean get() = !title.isNullOrBlank()
 

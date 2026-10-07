@@ -22,8 +22,9 @@ import java.util.concurrent.TimeUnit
  *      • type 1: unencrypted avcC (SPS/PPS) → (re)configure the decoder
  *      • type 0: AES-CTR-encrypted H.264 (AVCC) → decrypt, convert to Annex-B, decode
  *      • type 2: heartbeat, normally an EMPTY payload (payload_size 0) → ignore
- *      • type 5: streaming report (binary plist, sender-side stats; plus a fixed ~25 KB trailer
- *        while the iPhone is locked) → ignored, first occurrence hexdumped
+ *      • type 5: streaming report (binary plist with the sender's own stats — encoder fps, rtt,
+ *        loss, bitrate vs. link capacity; plus a fixed 25,000-byte trailer while the iPhone is
+ *        locked) → parsed into [ClientStreamingReport], logged every ~10 s + debug overlay
  *
  * Architecture: a network thread reads + decrypts packets (keeping the AES-CTR keystream strictly
  * ordered) and pushes work onto a bounded queue; a separate decoder thread consumes it. This way
@@ -70,6 +71,8 @@ class MirrorStreamServer(
     // Set by the reader thread when a frame is dropped under load; the decoder thread then skips
     // frames until the next keyframe (IDR) so it never decodes a reference-broken, corrupt stream.
     @Volatile private var awaitingKeyframe = false
+
+    private var reportsSeen = 0
 
     // Unknown payload types we already hexdumped this session (first occurrence only).
     private val dumpedPayloadTypes = mutableSetOf<Int>()
@@ -118,12 +121,12 @@ class MirrorStreamServer(
                         val annexB = MirrorCrypto.avccToAnnexB(cipher.update(payload))
                         if (annexB.isNotEmpty()) enqueue(Frame(annexB))
                     }
-                    1 -> parseConfig(payload)?.let { enqueue(it) }
+                    1 -> parseConfig(payload)?.let { enqueue(Config(it.sps, it.pps)) }
                     2 -> Logger.v("Mirror: heartbeat ($payloadSize B)")
+                    5 -> handleStreamingReport(payload)
                     else -> {
                         // Unknown types are ignored, but hexdump the first occurrence per type per
-                        // session: iOS 26 sends a steady ~25KB payload type 5 whose meaning is
-                        // still unidentified — this gives us material to analyse it offline.
+                        // session: new senders may add types — this gives us material to analyse offline.
                         if (dumpedPayloadTypes.add(payloadType)) {
                             val hdr = header.take(16).joinToString(" ") { "%02x".format(it) }
                             val head = payload.take(32).joinToString(" ") { "%02x".format(it) }
@@ -140,6 +143,17 @@ class MirrorStreamServer(
             running = false
             Logger.i("Mirror data connection ended")
         }
+    }
+
+    /**
+     * Type-5 sender report (~1/s). Logged on the first one and then every [REPORT_LOG_EVERY]-th, so
+     * a log line like `sender enc=60fps rtt=31ms loss=4.97%` sits next to our own `Video stats`:
+     * together they tell whether a bad picture is the iPhone, the network or our decoder.
+     */
+    private fun handleStreamingReport(payload: ByteArray) {
+        val report = ClientStreamingReport.parse(payload) ?: return
+        StreamStats.senderSummary = report.describe()
+        if (reportsSeen++ % REPORT_LOG_EVERY == 0) Logger.i("Mirror: ${report.describe()}")
     }
 
     /** Bounded enqueue — if the decoder is behind, drop the oldest item to keep latency bounded. */
@@ -162,16 +176,8 @@ class MirrorStreamServer(
         }
     }
 
-    private fun parseConfig(payload: ByteArray): Config? = try {
-        val spsSize = ((payload[6].toInt() and 0xFF) shl 8) or (payload[7].toInt() and 0xFF)
-        val sps = payload.copyOfRange(8, 8 + spsSize)
-        val ppsLenOffset = 8 + spsSize + 1                   // skip the 1-byte PPS count
-        val ppsSize = ((payload[ppsLenOffset].toInt() and 0xFF) shl 8) or
-            (payload[ppsLenOffset + 1].toInt() and 0xFF)
-        Config(sps, payload.copyOfRange(ppsLenOffset + 2, ppsLenOffset + 2 + ppsSize))
-    } catch (e: Exception) {
-        Logger.e("Mirror: failed to parse SPS/PPS", e); null
-    }
+    private fun parseConfig(payload: ByteArray): MirrorConfig? =
+        parseAvcC(payload).also { if (it == null) Logger.w("Mirror: ignoring malformed avcC config (${payload.size} B)") }
 
     // ─── Decoder thread: consume the queue; the only thread that touches the decoder ──────────
     private fun runDecoder() {
@@ -325,8 +331,33 @@ class MirrorStreamServer(
         private const val SURFACE_WAIT_TRIES = 50
         private const val SURFACE_WAIT_MS = 100L
         private const val MAX_UNHEALTHY_REBUILDS = 5
+        private const val REPORT_LOG_EVERY = 10                // ≈ every 10 s (one report per second)
     }
 }
+
+/**
+ * Parses the mirror type-1 config packet (an AVCDecoderConfigurationRecord, avcC) into its first SPS
+ * and PPS, or null when it is malformed. Every length is range-checked before use — a corrupt or
+ * truncated config used to surface as an exception stack trace — and an `hvc1` (HEVC) header is
+ * rejected: its layout differs and would otherwise be misread as SPS/PPS (we only advertise H.264).
+ * Deliberately no stricter checks (version byte, NAL types): the exact bytes iOS sends there were
+ * not captured, and a false rejection would mean no picture at all.
+ */
+internal fun parseAvcC(p: ByteArray): MirrorConfig? {
+    if (p.size >= 8 && p[4] == 'h'.code.toByte() && p[5] == 'v'.code.toByte() &&
+        p[6] == 'c'.code.toByte() && p[7] == '1'.code.toByte()) return null
+    if (p.size < 11) return null                                    // header + SPS length + ≥1 byte
+    val spsSize = ((p[6].toInt() and 0xFF) shl 8) or (p[7].toInt() and 0xFF)
+    val ppsLenOffset = 8 + spsSize + 1                              // skip the 1-byte PPS count
+    if (spsSize <= 0 || ppsLenOffset + 2 > p.size) return null
+    val ppsSize = ((p[ppsLenOffset].toInt() and 0xFF) shl 8) or (p[ppsLenOffset + 1].toInt() and 0xFF)
+    val ppsEnd = ppsLenOffset + 2 + ppsSize
+    if (ppsSize <= 0 || ppsEnd > p.size) return null
+    return MirrorConfig(p.copyOfRange(8, 8 + spsSize), p.copyOfRange(ppsLenOffset + 2, ppsEnd))
+}
+
+/** SPS + PPS NAL units (without start codes) from a mirror type-1 config packet. */
+internal class MirrorConfig(val sps: ByteArray, val pps: ByteArray)
 
 /**
  * True when the decoder must be rebound to the live surface.

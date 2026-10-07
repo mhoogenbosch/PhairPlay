@@ -45,8 +45,11 @@ class NowPlayingScreen @JvmOverloads constructor(
             gravity = Gravity.CENTER
         }
 
+        // The art must leave room for four text lines inside the TV-safe area. A fixed 360 dp was
+        // 720 px on a 1080p xhdpi TV: the card overflowed, clipping the art's top and the sender line.
+        val artSize = minOf(dp(ART_SIZE_DP), (resources.displayMetrics.heightPixels * ART_MAX_SCREEN_FRACTION).toInt())
         artwork = ImageView(context).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(ART_SIZE_DP), dp(ART_SIZE_DP))
+            layoutParams = LinearLayout.LayoutParams(artSize, artSize)
             scaleType = ImageView.ScaleType.CENTER_CROP
             // Rounded surface so the placeholder glyph (and any non-square art) sits on a card.
             background = GradientDrawable().apply {
@@ -57,16 +60,16 @@ class NowPlayingScreen @JvmOverloads constructor(
         }
 
         titleView = textView(TITLE_SP, R.color.text_primary, bold = true).apply {
-            setPadding(0, dp(28), 0, 0)
+            setPadding(0, dp(24), 0, 0)
         }
         artistView = textView(ARTIST_SP, R.color.text_secondary).apply {
             setPadding(0, dp(8), 0, 0)
         }
-        albumView = textView(ALBUM_SP, R.color.text_tertiary).apply {
+        albumView = textView(ALBUM_SP, R.color.text_tertiary, maxLines = 1).apply {
             setPadding(0, dp(4), 0, 0)
         }
-        senderView = textView(SENDER_SP, R.color.protocol_airplay).apply {
-            setPadding(0, dp(36), 0, 0)
+        senderView = textView(SENDER_SP, R.color.protocol_airplay, maxLines = 1).apply {
+            setPadding(0, dp(24), 0, 0)
         }
 
         column.addView(artwork)
@@ -75,6 +78,10 @@ class NowPlayingScreen @JvmOverloads constructor(
         column.addView(albumView)
         column.addView(senderView)
 
+        // 5 % TV-safe margin (overscan) on every side; the column centres inside it.
+        val safeV = (resources.displayMetrics.heightPixels * SAFE_MARGIN_FRACTION).toInt()
+        val safeH = (resources.displayMetrics.widthPixels * SAFE_MARGIN_FRACTION).toInt()
+        setPadding(safeH, safeV, safeH, safeV)
         addView(
             column,
             LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
@@ -120,11 +127,12 @@ class NowPlayingScreen @JvmOverloads constructor(
         }
     }
 
-    private fun textView(sizeSp: Float, colorRes: Int, bold: Boolean = false) = TextView(context).apply {
+    private fun textView(sizeSp: Float, colorRes: Int, bold: Boolean = false, maxLines: Int = 2) = TextView(context).apply {
         setTextColor(color(colorRes))
         setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
         gravity = Gravity.CENTER
-        maxLines = 2
+        this.maxLines = maxLines
+        ellipsize = android.text.TextUtils.TruncateAt.END
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
     }
 
@@ -135,6 +143,8 @@ class NowPlayingScreen @JvmOverloads constructor(
 
     companion object {
         private const val ART_SIZE_DP = 360
+        private const val ART_MAX_SCREEN_FRACTION = 0.5f   // of the screen height
+        private const val SAFE_MARGIN_FRACTION = 0.05f
         private const val TITLE_SP = 30f
         private const val ARTIST_SP = 22f
         private const val ALBUM_SP = 17f
