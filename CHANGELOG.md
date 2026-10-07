@@ -29,6 +29,10 @@ its releases as `<semver>-mh.<n>` on top of the upstream
   uses to fetch the HLS playlists from the iPhone (FCUP). It now gets `101 Switching Protocols`
   and everything the sender sends on it is logged; `GET /info` is answered; anything else still
   gets 503. The secondary connection never touches the primary session's state.
+- **`POST /fp-setup2` is answered with `421 Misdirected Request`** instead of `501`. The YouTube app
+  asks for this FairPlay variant before AirPlay video; with 501 it waited forever on an open
+  connection (seen on the Nokia: the video hung on "connecting"). UxPlay can't do fp-setup2 either
+  and answers 421, after which the sender continues.
 - **`POST /play` and `POST /action` are logged in full** (plists decoded, nested plists and
   playlists shown). A `mlhls://` (sender-mediated HLS) URL is acknowledged but not handed to the
   player, which can't play it — playback is phase 2.

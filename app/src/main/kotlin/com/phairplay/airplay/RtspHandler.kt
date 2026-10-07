@@ -438,6 +438,10 @@ open class RtspHandler(
         "/pair-pin-start" -> handlePairPinStart(request)
         "/pair-verify" -> handlePairVerify(request)
         "/fp-setup"    -> handleFpSetup(request)
+        // FairPlay variant the YouTube app asks for before AirPlay video. We (like UxPlay) only
+        // implement fp-setup v3. A 501 left the iPhone waiting forever on an open connection; UxPlay
+        // answers 421 Misdirected Request, after which the sender carries on without it.
+        "/fp-setup2"   -> handleFpSetup2(request)
         "/feedback"    -> handleFeedback(request)
         "/audioMode"   -> RtspResponse(200, "OK", protocol = request.responseProtocol())
         // AirPlay video URL mode (non-mirroring): play a URL + drive transport.
@@ -454,6 +458,14 @@ open class RtspHandler(
     // ─── AirPlay video URL mode (POST /play, /rate, /scrub, /stop; GET /playback-info, /scrub) ──
 
     /** POST /play — a media URL to play (binary/XML plist or legacy text body). */
+    private fun handleFpSetup2(request: RtspRequest): RtspResponse {
+        val version = request.bodyBytes.getOrNull(4)?.toInt()?.and(0xFF)
+        Logger.w("POST /fp-setup2 (${request.bodyBytes.size}B, FairPlay version 0x%02x) — unsupported, answering 421"
+            .format(version ?: 0))
+        return RtspResponse(421, "Misdirected Request", contentType = "application/x-apple-binary-plist",
+            protocol = request.responseProtocol())
+    }
+
     private fun handleAction(request: RtspRequest): RtspResponse {
         Logger.i("POST /action ${describeBody(request)}")
         return RtspResponse(200, "OK", protocol = request.responseProtocol())
