@@ -15,6 +15,36 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.13] - 2026-10-07
+
+### Fixed
+- **Now-playing card overflowed the screen.** The album art was a fixed 360 dp — 720 px on a
+  1080p xhdpi TV — so the art touched the top edge and the "Audio from …" line fell off the bottom.
+  The art is now at most half the screen height, the card keeps a 5 % TV-safe margin, and the album
+  and sender lines ellipsize instead of wrapping.
+- **Spotify's "• Video" marker is stripped from the artist** ("Lady Gaga, Bruno Mars • Video",
+  "OneRepublic • Video beschikbaar").
+- **Audio protocol markers no longer look like packet loss** (idea: 2archiver/Hearth). Header-only
+  RTP packets, the AAC-ELD no-data marker (`00 68 34 00`) and the ALAC format packet occupy a
+  sequence number but carry no audio. They were dropped (header-only) or fed to the decoder (the
+  others); a dropped one read as a gap — a needless resend request and up to 32 packets of hold.
+  They now advance the sequence and never reach the decoder.
+- **RTSP FLUSH now flushes** (idea: 2archiver/Hearth). It was acknowledged and ignored, so after a
+  pause/seek/skip up to ~1 s of stale audio could still play. The queue and reorder state are
+  cleared and the stream re-anchors at the `RTP-Info: seq=` of the new audio.
+- **Malformed mirror config packets are rejected cleanly** (idea: 2archiver/Hearth): every avcC
+  length is range-checked, an `hvc1` (HEVC) header is refused, and `avccToAnnexB` can no longer be
+  tricked by a length prefix that overflows `i + len` into ending the mirror with an exception.
+
+### Added
+- **Dutch translation** (`values-nl`).
+- **The sender's own streaming report is read** (ported from Matej-Hajek/PhairPlayPhone,
+  Apache-2.0). Mirror payload type 5 is a binary plist with the iPhone's encoder fps, rtt, loss and
+  bitrate vs. link capacity (plus a 25,000-byte trailer while it is locked). It used to be discarded;
+  it is now logged every ~10 s (`Mirror: sender enc=60fps rtt=31ms loss=0.00% tx=…`) and shown as a
+  SENDER line in the debug overlay — next to our own `Video stats` it tells whether a bad picture is
+  the iPhone, the network or the TV.
+
 ## [1.1.0-mh.12] - 2026-10-07
 
 Fixes picked from a review of all 39 forks of mazer666/PhairPlay. Each was re-implemented on this

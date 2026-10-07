@@ -31,16 +31,21 @@ object StreamStats {
     @Volatile var audioQueue = 0       // current playback-queue depth
     @Volatile var audioDupPct = 0      // % of RTP packets that were redundant duplicates
 
+    // ─── Sender (type-5 streaming report from the iPhone/Mac) ────────────────
+    @Volatile var senderSummary = ""   // ClientStreamingReport.describe(), refreshed ~1/s
+
     /** Clears per-stream counters (call when a mirror session ends). Keeps [overlayEnabled]. */
     fun resetStreams() {
         videoRes = ""; videoFps = 0; videoQueue = 0; videoDropPct = 0
         videoWidth = 0; videoHeight = 0
         audioActive = false; audioQueue = 0; audioDupPct = 0
+        senderSummary = ""
     }
 
     /** Human-readable multi-line HUD text. */
     fun summary(): String =
         "PhairPlay · debug\n" +
         "VIDEO  ${videoRes.ifEmpty { "—" }}   ${videoFps} fps   q ${videoQueue}   drop ${videoDropPct}%\n" +
-        "AUDIO  " + (if (audioActive) "on   q ${audioQueue}   dup ${audioDupPct}%" else "off")
+        "AUDIO  " + (if (audioActive) "on   q ${audioQueue}   dup ${audioDupPct}%" else "off") +
+        (if (senderSummary.isNotEmpty()) "\nSENDER $senderSummary" else "")
 }

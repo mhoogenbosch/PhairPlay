@@ -50,7 +50,9 @@ object MirrorCrypto {
                 ((data[i + 2].toInt() and 0xFF) shl 8) or
                 (data[i + 3].toInt() and 0xFF)
             i += 4
-            if (len <= 0 || i + len > data.size) break
+            // `len > size - i`, not `i + len > size`: a corrupt prefix ≥ 2^31 − i overflows the sum
+            // to a negative number, passes the check, and out.write() throws — ending the mirror.
+            if (len <= 0 || len > data.size - i) break
             out.write(START_CODE)
             out.write(data, i, len)
             i += len
