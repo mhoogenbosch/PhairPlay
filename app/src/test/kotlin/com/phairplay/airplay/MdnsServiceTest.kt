@@ -165,4 +165,34 @@ class MdnsServiceTest {
             mockNsdManager.registerService(any(), NsdManager.PROTOCOL_DNS_SD, any())
         }
     }
+    /**
+     * Test: a restart that is still waiting for its unregistration callbacks never completes once
+     * the service has been stopped (mh.15). Before, the late callbacks re-registered a stale
+     * advertisement for a receiver that no longer existed.
+     */
+    @Test
+    fun `stop cancels a pending restart`() {
+        val unregistered = mutableListOf<NsdManager.RegistrationListener>()
+        every { mockNsdManager.unregisterService(capture(unregistered)) } returns Unit
+        val service = MdnsService(mockContext)
+        service.start()
+        service.restart()          // waits for 2 unregistration callbacks
+        service.stop()             // receiver stopped in between
+        unregistered.toList().forEach { it.onServiceUnregistered(mockk(relaxed = true)) }
+
+        verify(exactly = 2) {      // only the original start registered
+            mockNsdManager.registerService(any(), NsdManager.PROTOCOL_DNS_SD, any())
+        }
+    }
+
+    /** Test: a stopped MdnsService can never register again (start/restart are no-ops). */
+    @Test
+    fun `a stopped service never registers again`() {
+        mdnsService.stop()
+        mdnsService.start()
+        mdnsService.restart()
+        verify(exactly = 0) {
+            mockNsdManager.registerService(any(), NsdManager.PROTOCOL_DNS_SD, any())
+        }
+    }
 }

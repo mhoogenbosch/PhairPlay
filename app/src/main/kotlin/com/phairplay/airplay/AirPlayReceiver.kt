@@ -8,6 +8,7 @@ import com.phairplay.airplay.handshake.BufferedAudioServer
 import com.phairplay.airplay.handshake.MirrorStreamServer
 import com.phairplay.service.ProtocolState
 import com.phairplay.util.Logger
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -91,7 +92,12 @@ class AirPlayReceiver(
      */
     private val onNowPlayingChanged: (NowPlayingInfo?) -> Unit = {},
     /** Pairing PIN to show ([pin]) or hide (null) on the TV during SRP pair-setup. */
-    private val onPinChanged: (pin: String?) -> Unit = {}
+    private val onPinChanged: (pin: String?) -> Unit = {},
+    /**
+     * Where [onStateChanged] runs. Main in production (Android UI rule); tests pass an inline
+     * dispatcher. Must preserve submission order — every state goes through it in sequence.
+     */
+    private val stateDispatcher: CoroutineDispatcher = Dispatchers.Main
 ) {
 
     // Persistent store of paired controllers (for PIN access control / pair-verify).
@@ -130,11 +136,25 @@ class AirPlayReceiver(
     // The now-playing card shows only when audio plays WITHOUT video. We track both stream kinds
     // plus the latest DMAP metadata/artwork and recompute on every change (see [emitNowPlaying]).
     @Volatile private var audioPlaying = false
-    // TEARDOWN of the last stream and the subsequent socket close both call onStreamingStopped;
-    // without this guard the mDNS restart runs twice concurrently, and the second restart races
-    // the first one's fresh registration — escalating the advertised name to "(3)"/"(4)".
-    @Volatile private var streamingStopped = false
     @Volatile private var videoPlaying = false
+
+    // ─── Session state (receiver-owned) ──────────────────────────────────────
+    // One lock serialises every session start and teardown. TEARDOWN of the last stream and the
+    // subsequent socket close both call onStreamingStopped; only the call that flips [sessionActive]
+    // from true to false emits ADVERTISING and restarts mDNS — a second, concurrent mDNS restart
+    // races the first one's fresh registration and escalates the name to "(3)"/"(4)" (mh.2).
+    // Until mh.15 the guard was a one-way flag that only the legacy RECORD path reset, so from the
+    // second mirror / AirPlay 2 audio session after a service start the teardown was a no-op: the
+    // UI stayed on CONNECTED (black screen, Back swallowed) and every session's NTP client + event
+    // socket leaked. Every session start now re-arms it.
+    private val sessionLock = Any()
+    @Volatile private var sessionActive = false
+    // Bumped on every session start, so a media pipeline launched for an older session can tell it
+    // has been superseded before it builds anything.
+    @Volatile private var sessionGeneration = 0
+    // Address of the sender of the current session (null = unknown → accept everything). Media
+    // sockets drop packets / connections from any other host.
+    @Volatile private var sessionPeer: java.net.InetAddress? = null
     @Volatile private var npSenderName = "AirPlay"
     // Name mDNS actually registered (may carry a " (2)" collision suffix); GET /info must match it.
     @Volatile private var registeredName: String? = null
@@ -181,7 +201,11 @@ class AirPlayReceiver(
             timingHandler?.stop()
             mdnsService?.stop()
             dacpClient.stop()
-            releaseMediaComponents()
+            synchronized(sessionLock) {
+                sessionActive = false
+                releaseMediaComponents()
+                releaseSessionKeys()
+            }
         } catch (e: Exception) {
             Logger.e("Error during AirPlayReceiver stop", e)
         } finally {
@@ -242,7 +266,11 @@ class AirPlayReceiver(
     private fun startMdnsService() {
         mdnsService = MdnsService(
             context = context,
-            onStateChange = { state -> emitState(state) },
+            // mDNS reports the advertisement, not the session: while a session runs, its
+            // DISABLED/ADVERTISING (from the per-session restart, readvertise() or the self-healing
+            // watchdogs) must not overwrite CONNECTED — that used to drop the streaming screen and
+            // move the app to the back mid-mirror. The session end emits the right state itself.
+            onStateChange = { state -> emitState(state, fromMdns = true) },
             onActualNameRegistered = { actualName ->
                 registeredName = actualName
                 onActualNameRegistered(actualName)
@@ -259,7 +287,7 @@ class AirPlayReceiver(
             audioEnabled = audioEnabled,
             videoSurfaceProvider = videoSurfaceProvider,
             onStreamingStarted = { session -> onStreamingStarted(session) },
-            onStreamingStopped = { onStreamingStopped() },
+            onStreamingStopped = { keepKeys -> onStreamingStopped(keepSessionKeys = keepKeys) },
             onPhotoReceived = { bytes, imageType -> onPhotoReceived(bytes, imageType) },
             onPhotoCleared = { onPhotoCleared() },
             onMirrorSetupKeys = { aesKey, ecdhSecret, aesIv, remoteAddr, senderTimingPort, senderName ->
@@ -300,6 +328,16 @@ class AirPlayReceiver(
     // ─── Private: streaming lifecycle ────────────────────────────────────────
 
     /**
+     * Marks a session as running (or keeps it running) and remembers its sender address. Under
+     * [sessionLock]. Returns the new session generation.
+     */
+    private fun activateSessionLocked(peer: java.net.InetAddress?): Int {
+        sessionActive = true
+        if (peer != null) sessionPeer = peer
+        return ++sessionGeneration
+    }
+
+    /**
      * Called by [RtspHandler] when RECORD is received and [SessionDescription] is ready.
      *
      * Wires the media pipeline:
@@ -308,14 +346,23 @@ class AirPlayReceiver(
      * - audio-only:   only [AudioPlayer], app stays on HomeScreen
      */
     private fun onStreamingStarted(session: SessionDescription) {
-        streamingStopped = false
+        val generation = synchronized(sessionLock) {
+            // A repeated RECORD (resume after PAUSE) used to stack a second AudioPlayer and a second
+            // UDP receiver on top of the first (the bind failed, the old player leaked). Replace them.
+            releaseLegacyPipelineLocked()
+            activateSessionLocked(rtspHandler?.peerAddress)
+        }
         Logger.i("Streaming started — video=${session.hasVideo} audio=${session.hasAudio} " +
                  "audioOnly=${session.isAudioOnly}")
 
         scope.launch {
             try {
-                if (session.hasVideo) startVideoDecoder(session)
-                if (session.hasAudio) startAudioPlayer(session)
+                synchronized(sessionLock) {
+                    // Superseded (session ended or a newer one started) before we got to run.
+                    if (generation != sessionGeneration || !sessionActive) return@launch
+                    if (session.hasVideo) startVideoDecoder(session)
+                    if (session.hasAudio) startAudioPlayer(session)
+                }
                 // Legacy (SDP) session: reflect its stream kinds into now-playing state so an
                 // audio-only RAOP session shows the now-playing card.
                 npSenderName = session.senderName.ifBlank { npSenderName }
@@ -334,16 +381,32 @@ class AirPlayReceiver(
     }
 
     /**
-     * Called when streaming ends (TEARDOWN received or socket closed).
+     * Called when streaming ends: TEARDOWN (of the session or of its last stream), the control
+     * connection closing, or URL video ending.
      *
-     * Releases media components and re-advertises so the device reappears
-     * in sender pickers immediately.
+     * Releases media components and re-advertises so the device reappears in sender pickers
+     * immediately. Idempotent and serialised: only the call that actually ends a running session
+     * emits ADVERTISING and restarts mDNS.
+     *
+     * @param keepSessionKeys true when only the last *stream* went away (stream-level TEARDOWN):
+     *   media stops, but the FairPlay/ECDH keys, NTP client and event channel stay until the session
+     *   TEARDOWN or the control connection closes — so a re-SETUP of stream 96/110 on the same
+     *   connection still works. false = full teardown.
      */
-    private fun onStreamingStopped() {
-        if (streamingStopped) return
-        streamingStopped = true
-        Logger.i("Streaming stopped — releasing media components")
-        releaseMediaComponents()
+    private fun onStreamingStopped(keepSessionKeys: Boolean = false) {
+        val wasActive = synchronized(sessionLock) {
+            val active = sessionActive
+            sessionActive = false
+            sessionGeneration++
+            releaseMediaComponents()
+            if (!keepSessionKeys) releaseSessionKeys()
+            active
+        }
+        if (!wasActive) {
+            if (!keepSessionKeys) Logger.d("Session resources released (no session was running)")
+            return
+        }
+        Logger.i("Streaming stopped — media released" + if (keepSessionKeys) " (session keys kept)" else "")
         emitState(ProtocolState.ADVERTISING)
 
         scope.launch {
@@ -353,6 +416,19 @@ class AirPlayReceiver(
                 Logger.e("Failed to restart mDNS after streaming", e)
             }
         }
+    }
+
+    /**
+     * A stream is being (re-)added on a live connection. When the session had ended with its last
+     * stream (keys kept), this brings it back: CONNECTED again so the streaming screen returns.
+     * Under [sessionLock].
+     */
+    private fun ensureSessionActiveLocked() {
+        if (sessionActive) return
+        activateSessionLocked(null)
+        Logger.i("Stream re-added on the same connection — session active again")
+        onSenderNameChanged(npSenderName)
+        emitState(ProtocolState.CONNECTED)
     }
 
     // ─── Private: media pipeline ──────────────────────────────────────────────
@@ -426,8 +502,9 @@ class AirPlayReceiver(
      */
     private fun startAudioUdpReceiver() {
         scope.launch(Dispatchers.IO) {
+            var socket: DatagramSocket? = null
             try {
-                val socket = DatagramSocket(AUDIO_RTP_PORT)
+                socket = DatagramSocket(AUDIO_RTP_PORT)
                 audioSocket = socket
                 Logger.i("Audio UDP receiver listening on port $AUDIO_RTP_PORT")
 
@@ -435,13 +512,14 @@ class AirPlayReceiver(
                 val packet = DatagramPacket(buf, buf.size)
 
                 while (isActive) {
+                    packet.length = buf.size
                     socket.receive(packet)
                     // copyOf trims to actual packet length before passing to the player
                     audioPlayer?.playAudioPacket(packet.data.copyOf(packet.length))
                 }
             } catch (e: Exception) {
-                // SocketException thrown when audioSocket.close() is called — expected
-                if (audioSocket != null) {
+                // SocketException thrown when the socket is closed by releaseMediaComponents — expected
+                if (socket != null && audioSocket === socket) {
                     Logger.e("Audio UDP receiver error (unexpected)", e)
                 } else {
                     Logger.d("Audio socket closed (expected during shutdown)")
@@ -464,11 +542,14 @@ class AirPlayReceiver(
         remoteAddress: java.net.InetAddress,
         senderTimingPort: Int,
         senderName: String? = null,
-    ): Pair<Int, Int> {
+    ): Pair<Int, Int> = synchronized(sessionLock) {
         senderName?.let { npSenderName = it }
+        // A repeated key message must not stack a second NTP client / event socket on the first.
+        closeTimingAndEventLocked()
         mirrorAesKey = aesKey
         mirrorEcdhSecret = ecdhSecret
         mirrorAesIv = aesIv
+        activateSessionLocked(remoteAddress)
         val event = ServerSocket(0)
         eventSocket = event
         // Accept + drain the event connection. We don't act on events yet, but macOS expects
@@ -483,7 +564,7 @@ class AirPlayReceiver(
                     while (isActive && input.read(buf) != -1) { /* drain */ }
                 }
             } catch (e: Exception) {
-                if (eventSocket != null) Logger.d("Event channel closed")
+                if (eventSocket === event) Logger.d("Event channel closed")
             } finally {
                 eventClientSocket = null
             }
@@ -495,37 +576,42 @@ class AirPlayReceiver(
         onSenderNameChanged(senderName ?: "AirPlay")
         emitState(ProtocolState.CONNECTED)
         Logger.i("Mirror keys set (sender='${senderName ?: "?"}'); eventPort=${event.localPort} timingPort=${ntp.localPort}")
-        return event.localPort to ntp.localPort
+        event.localPort to ntp.localPort
     }
 
     /**
      * Mirror SETUP msg 2: start the data-stream server for the requested stream.
      * @return the data server's TCP port (macOS connects here to send H.264).
      */
-    private fun startMirrorStream(streamConnectionId: Long): Int {
+    private fun startMirrorStream(streamConnectionId: Long): Int = synchronized(sessionLock) {
         val aesKey = mirrorAesKey ?: run { Logger.e("mirror stream start before keys set"); return 0 }
         val ecdhSecret = mirrorEcdhSecret ?: return 0
-        return MirrorStreamServer(aesKey, ecdhSecret, streamConnectionId, videoSurfaceProvider, mirrorWidth, mirrorHeight)
+        mirrorServer?.stop()                     // never two data servers for one session
+        ensureSessionActiveLocked()
+        MirrorStreamServer(aesKey, ecdhSecret, streamConnectionId, videoSurfaceProvider, mirrorWidth, mirrorHeight)
             .also { mirrorServer = it; it.start(scope); videoPlaying = true; emitNowPlaying() }
             .dataPort
             .also { Logger.i("Mirror data server started on port $it") }
     }
 
     /** Mirror SETUP audio stream (type 96): start the AAC-ELD / AAC-LC / ALAC audio server. @return (dataPort, controlPort). */
-    private fun startMirrorAudio(sampleRate: Int, channels: Int, codecType: Int, framesPerPacket: Int): Pair<Int, Int> {
-        val aesKey = mirrorAesKey ?: run { Logger.e("audio start before keys set"); return 0 to 0 }
-        val ecdhSecret = mirrorEcdhSecret ?: return 0 to 0
-        val aesIv = mirrorAesIv ?: return 0 to 0
-        val server = AudioStreamServer(aesKey, ecdhSecret, aesIv, sampleRate, channels, codecType, framesPerPacket)
-            .also { audioServer = it; it.start(scope) }
-        audioPlaying = true
-        emitNowPlaying()
-        Logger.i("Mirror audio server started: dataPort=${server.dataPort} controlPort=${server.controlPort}")
-        return server.dataPort to server.controlPort
-    }
+    private fun startMirrorAudio(sampleRate: Int, channels: Int, codecType: Int, framesPerPacket: Int): Pair<Int, Int> =
+        synchronized(sessionLock) {
+            val aesKey = mirrorAesKey ?: run { Logger.e("audio start before keys set"); return 0 to 0 }
+            val ecdhSecret = mirrorEcdhSecret ?: return 0 to 0
+            val aesIv = mirrorAesIv ?: return 0 to 0
+            audioServer?.stop()                  // never two audio servers for one session
+            ensureSessionActiveLocked()
+            val server = AudioStreamServer(aesKey, ecdhSecret, aesIv, sampleRate, channels, codecType, framesPerPacket)
+                .also { audioServer = it; it.start(scope) }
+            audioPlaying = true
+            emitNowPlaying()
+            Logger.i("Mirror audio server started: dataPort=${server.dataPort} controlPort=${server.controlPort}")
+            server.dataPort to server.controlPort
+        }
 
     /** Stops ONLY the mirror audio stream (macOS dynamic-stream TEARDOWN) — video keeps running. */
-    private fun stopMirrorAudio() {
+    private fun stopMirrorAudio() = synchronized(sessionLock) {
         audioServer?.stop()
         audioServer = null
         audioPlaying = false
@@ -535,7 +621,7 @@ class AirPlayReceiver(
     }
 
     /** Stops ONLY the mirror video stream (macOS dynamic-stream TEARDOWN) — audio keeps playing. */
-    private fun stopMirrorVideo() {
+    private fun stopMirrorVideo() = synchronized(sessionLock) {
         mirrorServer?.stop()
         mirrorServer = null
         videoPlaying = false
@@ -548,36 +634,42 @@ class AirPlayReceiver(
      * [AirPlayVideoPlayer], which fetches + plays it via MediaPlayer onto the same Surface.
      */
     private fun startUrlVideo(url: String, startFraction: Double) {
-        onSenderNameChanged("AirPlay")
-        emitState(ProtocolState.CONNECTED)   // shows StreamingScreen → Surface becomes available
-        val player = urlVideoPlayer ?: AirPlayVideoPlayer(
-            surfaceProvider = videoSurfaceProvider,
-            onEnded = { stopUrlVideo() }
-        ).also { urlVideoPlayer = it }
+        val player = synchronized(sessionLock) {
+            activateSessionLocked(rtspHandler?.peerAddress)
+            onSenderNameChanged("AirPlay")
+            emitState(ProtocolState.CONNECTED)   // shows StreamingScreen → Surface becomes available
+            urlVideoPlayer ?: AirPlayVideoPlayer(
+                surfaceProvider = videoSurfaceProvider,
+                onEnded = { stopUrlVideo() }
+            ).also { urlVideoPlayer = it }
+        }
         player.play(url, startFraction)
         Logger.i("AirPlay URL video started: $url (start=$startFraction)")
     }
 
     /** Stops AirPlay video URL playback (POST /stop or end-of-media) and ends the session. */
     private fun stopUrlVideo() {
-        urlVideoPlayer?.release()
-        urlVideoPlayer = null
+        synchronized(sessionLock) {
+            urlVideoPlayer?.release()
+            urlVideoPlayer = null
+        }
         onStreamingStopped()
         Logger.i("AirPlay URL video stopped")
     }
 
     /** Starts the AirPlay 2 buffered audio-only stream (type 103, Apple Music → TV); returns its TCP port. */
-    private fun startBufferedAudio(): Int {
+    private fun startBufferedAudio(): Int = synchronized(sessionLock) {
         bufferedAudioServer?.stop()
+        ensureSessionActiveLocked()
         val server = BufferedAudioServer().also { bufferedAudioServer = it; it.start(scope) }
         audioPlaying = true   // buffered audio (type 103) is always audio-only
         emitNowPlaying()
         Logger.i("Buffered audio server started: dataPort=${server.dataPort}")
-        return server.dataPort
+        server.dataPort
     }
 
     /** Stops the buffered audio-only stream (type 103 TEARDOWN). */
-    private fun stopBufferedAudio() {
+    private fun stopBufferedAudio() = synchronized(sessionLock) {
         bufferedAudioServer?.stop()
         bufferedAudioServer = null
         audioPlaying = false
@@ -586,11 +678,45 @@ class AirPlayReceiver(
         Logger.i("Buffered audio stream stopped")
     }
 
-    /** Clears the video NAL callback, closes the audio socket, and releases media components. */
-    private fun releaseMediaComponents() {
+    /** Legacy (SDP) pipeline only: video decoder, AudioPlayer and its UDP socket. Under [sessionLock]. */
+    private fun releaseLegacyPipelineLocked() {
         rtspHandler?.onVideoNalUnit = null
         try { audioSocket?.close() } catch (e: Exception) { /* non-fatal */ }
         audioSocket = null
+        videoDecoder?.release()
+        videoDecoder = null
+        audioPlayer?.release()
+        audioPlayer = null
+    }
+
+    /** NTP client + event channel of the AirPlay 2 session. Under [sessionLock]. */
+    private fun closeTimingAndEventLocked() {
+        ntpClient?.stop()
+        ntpClient = null
+        try { eventClientSocket?.close() } catch (e: Exception) { /* non-fatal */ }
+        eventClientSocket = null
+        try { eventSocket?.close() } catch (e: Exception) { /* non-fatal */ }
+        eventSocket = null
+    }
+
+    /**
+     * Clears the FairPlay/ECDH keys, the NTP client and the event channel — only on a FULL teardown
+     * (session TEARDOWN or control-connection close). A per-stream teardown (stopMirrorAudio /
+     * stopMirrorVideo) and the removal of the LAST stream keep them, so macOS/iOS can re-add a stream
+     * on the same live session without re-sending keys. Clearing here prevents a brand-new control
+     * connection from reusing a previous session's stale keys. Under [sessionLock].
+     */
+    private fun releaseSessionKeys() {
+        closeTimingAndEventLocked()
+        mirrorAesKey = null
+        mirrorEcdhSecret = null
+        mirrorAesIv = null
+        sessionPeer = null
+    }
+
+    /** Stops every media stream/player (not the session keys — see [releaseSessionKeys]). */
+    private fun releaseMediaComponents() {
+        releaseLegacyPipelineLocked()
         mirrorServer?.stop()
         mirrorServer = null
         audioServer?.stop()
@@ -599,25 +725,6 @@ class AirPlayReceiver(
         bufferedAudioServer = null
         urlVideoPlayer?.release()
         urlVideoPlayer = null
-        ntpClient?.stop()
-        ntpClient = null
-        try { eventClientSocket?.close() } catch (e: Exception) { /* non-fatal */ }
-        eventClientSocket = null
-        try { eventSocket?.close() } catch (e: Exception) { /* non-fatal */ }
-        eventSocket = null
-        // Clear the FairPlay/ECDH keys on FULL teardown only. This method runs on a genuine session
-        // end (last-stream / session TEARDOWN, or control-connection close) — NOT on a per-stream
-        // teardown, which goes through stopMirrorAudio/stopMirrorVideo and leaves the keys intact so
-        // macOS can re-add a dynamic stream on the same live session without re-sending keys (that
-        // dynamic-readd path is why the keys must survive a stream stop). Clearing here prevents a
-        // brand-new control connection from reusing a previous session's stale keys.
-        mirrorAesKey = null
-        mirrorEcdhSecret = null
-        mirrorAesIv = null
-        videoDecoder?.release()
-        videoDecoder = null
-        audioPlayer?.release()
-        audioPlayer = null
         // Session fully torn down — clear now-playing so the UI leaves the audio card.
         audioPlaying = false
         videoPlaying = false
@@ -640,14 +747,36 @@ class AirPlayReceiver(
 
     // ─── Private: state emission ─────────────────────────────────────────────
 
-    /** Dispatches [state] on the Main thread (Android UI rule). */
-    private fun emitState(state: ProtocolState) {
-        scope.launch {
-            withContext(Dispatchers.Main) {
-                onStateChanged(state)
+    /**
+     * Dispatches [state] on [stateDispatcher] (Main: Android UI rule), in submission order.
+     *
+     * [fromMdns] states describe the advertisement, not the session: they are dropped while a
+     * session is running so they can never replace CONNECTED. The check runs when the state is
+     * delivered, so a late mDNS event queued before a session start is still overridden by the
+     * CONNECTED that follows it, and one delivered during the session is ignored.
+     */
+    private fun emitState(state: ProtocolState, fromMdns: Boolean = false) {
+        scope.launch(stateDispatcher) {
+            if (fromMdns && sessionActive) {
+                Logger.d("mDNS state $state while a session is active — UI stays CONNECTED")
+                return@launch
             }
+            onStateChanged(state)
         }
     }
+
+    // ─── Test seams ──────────────────────────────────────────────────────────
+
+    internal fun startMirrorKeysForTest(remote: java.net.InetAddress, senderTimingPort: Int, name: String?) =
+        startMirrorKeys(ByteArray(16), ByteArray(32), ByteArray(16), remote, senderTimingPort, name)
+    internal fun startMirrorAudioForTest(ct: Int) = startMirrorAudio(44100, 2, ct, 352)
+    internal fun startMirrorStreamForTest() = startMirrorStream(1L)
+    internal fun onStreamingStoppedForTest(keepKeys: Boolean) = onStreamingStopped(keepKeys)
+    internal fun emitMdnsStateForTest(state: ProtocolState) = emitState(state, fromMdns = true)
+    internal val hasNtpClient: Boolean get() = ntpClient != null
+    internal val hasEventSocket: Boolean get() = eventSocket != null
+    internal val hasSessionKeys: Boolean get() = mirrorAesKey != null
+    internal val isSessionActive: Boolean get() = sessionActive
 
     companion object {
         // Hint dimensions for MediaCodec configuration.

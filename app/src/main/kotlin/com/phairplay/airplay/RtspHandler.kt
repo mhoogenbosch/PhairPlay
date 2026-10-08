@@ -28,7 +28,12 @@ open class RtspHandler(
     private val audioEnabled: Boolean = false,
     private val videoSurfaceProvider: () -> android.view.Surface?,
     private val onStreamingStarted: (session: SessionDescription) -> Unit,
-    private val onStreamingStopped: () -> Unit,
+    /**
+     * Streaming ended. [keepSessionKeys] = true when only the LAST stream was torn down (stream-level
+     * TEARDOWN): stop the media but keep the session keys/NTP so the stream can be re-added on this
+     * connection. false = session TEARDOWN or the control connection closed.
+     */
+    private val onStreamingStopped: (keepSessionKeys: Boolean) -> Unit,
     private val onPhotoReceived: (bytes: ByteArray, imageType: PhotoImageType) -> Unit = { _, _ -> },
     private val onPhotoCleared: () -> Unit = {},
     /**
@@ -121,6 +126,9 @@ open class RtspHandler(
     /** Remote (sender) address of the active control connection — needed for AirPlay 2 NTP. */
     @Volatile
     private var currentRemoteAddress: java.net.InetAddress? = null
+
+    /** The sender of the current control connection (null when none) — media sockets filter on it. */
+    val peerAddress: java.net.InetAddress? get() = currentRemoteAddress
 
     /** True once an AirPlay 2 mirroring SETUP has run on this connection (no ANNOUNCE/SDP). */
     @Volatile
@@ -312,7 +320,7 @@ open class RtspHandler(
             isMirrorSession = false
             activeStreamTypes.clear()
             setupCount = 0
-            onStreamingStopped()
+            onStreamingStopped(false)
         }
     }
 
@@ -995,12 +1003,17 @@ open class RtspHandler(
                 Logger.i("TEARDOWN streams=$streamTypes — stopped those, session continues (active=$activeStreamTypes)")
                 return RtspResponse(statusCode = 200, statusMessage = "OK", protocol = request.responseProtocol())
             }
-            Logger.i("TEARDOWN streams=$streamTypes — last stream removed, ending session")
+            // Stop the media, but keep the keys/NTP/event channel until the session TEARDOWN or the
+            // connection closes: a re-SETUP of stream 96/110 on this connection must still find them.
+            Logger.i("TEARDOWN streams=$streamTypes — last stream removed, stopping media (session keys kept)")
+            activeStreamTypes.clear()
+            onStreamingStopped(true)
+            return RtspResponse(statusCode = 200, statusMessage = "OK", protocol = request.responseProtocol())
         } else {
             Logger.i("TEARDOWN (session, body=${request.bodyBytes.size}B) — streaming stopping")
         }
         activeStreamTypes.clear()
-        onStreamingStopped()
+        onStreamingStopped(false)
         return RtspResponse(statusCode = 200, statusMessage = "OK", protocol = request.responseProtocol())
     }
 
