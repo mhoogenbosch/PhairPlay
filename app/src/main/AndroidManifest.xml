@@ -124,15 +124,16 @@
             android:stopWithTask="false" />
 
         <!--
-            BootReceiver — listens for BOOT_COMPLETED and starts PhairPlayService
-            if the "Start on boot" setting is enabled.
-            exported="false" because it is only triggered by the system broadcast.
+            BootReceiver — listens for BOOT_COMPLETED and MY_PACKAGE_REPLACED (after an update)
+            and starts PhairPlayService if the "Start on boot" setting is enabled.
+            exported="false" because it is only triggered by system broadcasts.
         -->
         <receiver
             android:name=".service.BootReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
