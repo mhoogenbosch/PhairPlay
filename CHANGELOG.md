@@ -15,6 +15,22 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.16] - 2026-10-10
+
+### Fixed
+- **A sender that vanished no longer blocks the receiver until a restart** (#19). Once a session
+  was set up the control socket had no idle timeout, so a sender that disappeared without closing
+  the connection (TV into standby while mirroring, phone off the Wi-Fi) left the session open
+  forever: the TV stayed advertised, but every new sender got `503`. Seen in a Sony X90J standby
+  log as a `NTP client send error` every 2 s all night. Two ways out now:
+  - **NTP silence:** the receiver polls the sender's timing port every 2 s during mirroring; after
+    30 s without a single reply the session is torn down.
+  - **Network lost:** when the TV's last network goes away, the open session is dropped at once —
+    a sender on a link-local address keeps its TCP socket alive across the drop otherwise.
+  Unit tests cover the NTP watchdog (silent sender, answering sender, stop before the timeout).
+
+---
+
 ## [1.1.0-mh.15] - 2026-10-10
 
 ### Removed

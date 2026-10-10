@@ -21,11 +21,19 @@ import java.net.InetAddress
  * sync isn't required to start mirroring (frames render on arrival), so we keep this minimal —
  * the goal is to satisfy macOS that timing is live.
  *
+ * The replies double as a liveness signal: a sender that vanished without closing the control
+ * connection (Wi-Fi gone, TV in standby) never answers again. After [silenceTimeoutMs] without a
+ * single reply [onSenderSilent] fires once, so the session can be torn down instead of blocking
+ * every new connection with 503 until the app is restarted (#19).
+ *
  * Reference: RPiPlay lib/raop_ntp.c (raop_ntp_thread).
  */
 class AirPlayNtpClient(
     private val remoteAddress: InetAddress,
     private val remoteTimingPort: Int,
+    private val silenceTimeoutMs: Long = SENDER_SILENCE_TIMEOUT_MS,
+    private val pollIntervalMs: Long = POLL_INTERVAL_MS,
+    private val onSenderSilent: (() -> Unit)? = null,
 ) {
     private val socket = DatagramSocket()      // OS-assigned local port
     @Volatile private var running = false
@@ -54,7 +62,15 @@ class AirPlayNtpClient(
         val response = ByteArray(128)
         var first = true
         var rxCount = 0
+        var lastReplyAt = System.currentTimeMillis()
         while (running) {
+            val silentMs = System.currentTimeMillis() - lastReplyAt
+            if (silentMs >= silenceTimeoutMs) {
+                Logger.w("NTP: no timing reply from the sender for ${silentMs / 1000}s — sender is gone")
+                running = false
+                onSenderSilent?.invoke()
+                return
+            }
             try {
                 putNtpTimestamp(request, 24, System.currentTimeMillis())
                 socket.send(DatagramPacket(request, request.size, remoteAddress, remoteTimingPort))
@@ -62,6 +78,7 @@ class AirPlayNtpClient(
                 try {
                     val rx = DatagramPacket(response, response.size)
                     socket.receive(rx)
+                    lastReplyAt = System.currentTimeMillis()
                     if (rxCount < 4) {
                         Logger.i("NTP RX[$rxCount] ${rx.length}B type=0x${(response[1].toInt() and 0xFF).toString(16)}: " +
                             (0 until minOf(rx.length, 32)).joinToString(" ") { "%02x".format(response[it]) })
@@ -71,7 +88,7 @@ class AirPlayNtpClient(
             } catch (e: Exception) {
                 if (running) Logger.e("NTP client send error", e)
             }
-            try { Thread.sleep(POLL_INTERVAL_MS) } catch (_: InterruptedException) { return }
+            try { Thread.sleep(pollIntervalMs) } catch (_: InterruptedException) { return }
         }
     }
 
@@ -94,5 +111,7 @@ class AirPlayNtpClient(
         private const val NTP_EPOCH_OFFSET = 2208988800L   // seconds between 1900 and 1970
         private const val POLL_INTERVAL_MS = 2000L
         private const val RECV_TIMEOUT_MS = 1000
+        /** 15 missed polls; a live sender answers every one of them. */
+        const val SENDER_SILENCE_TIMEOUT_MS = 30_000L
     }
 }

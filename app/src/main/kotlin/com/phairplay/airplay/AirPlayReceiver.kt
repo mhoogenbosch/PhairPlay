@@ -226,6 +226,12 @@ class AirPlayReceiver(
         return true
     }
 
+    /**
+     * Tears down the current session, if any, for a sender that is gone without having closed the
+     * connection (#19). Safe to call at any time; a no-op without an active session.
+     */
+    fun dropSession(reason: String): Boolean = rtspHandler?.dropActiveSession(reason) ?: false
+
     // ─── Private: startup ────────────────────────────────────────────────────
 
     private fun startTimingHandler() {
@@ -483,7 +489,9 @@ class AirPlayReceiver(
             }
         }
         // AirPlay 2 NTP is receiver-initiated: poll the sender's timing port so macOS proceeds.
-        val ntp = AirPlayNtpClient(remoteAddress, senderTimingPort).also { ntpClient = it; it.start(scope) }
+        val ntp = AirPlayNtpClient(remoteAddress, senderTimingPort, onSenderSilent = {
+            dropSession("sender stopped answering NTP timing requests")
+        }).also { ntpClient = it; it.start(scope) }
         onSenderNameChanged(senderName ?: "AirPlay")
         emitState(ProtocolState.CONNECTED)
         Logger.i("Mirror keys set (sender='${senderName ?: "?"}'); eventPort=${event.localPort} timingPort=${ntp.localPort}")
