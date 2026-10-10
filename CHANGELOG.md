@@ -15,6 +15,19 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.17] - 2026-10-10
+
+### Changed
+- **The receiver restarts itself after an update.** An update kills the app and nothing started the
+  service again, so the TV was no AirPlay receiver until the app was opened — an update therefore
+  had to bring the app to the front and interrupt whatever was playing. `BootReceiver` now also
+  handles `MY_PACKAGE_REPLACED` (same "Start on boot" setting), which Android delivers to the new
+  version and which is exempt from the background foreground-service start restriction. An
+  `adb install -r` now updates a TV without touching the screen. TVs whose vendor blocks background
+  service starts (TCL) still need the app opened once.
+
+---
+
 ## [1.1.0-mh.16] - 2026-10-10
 
 ### Fixed

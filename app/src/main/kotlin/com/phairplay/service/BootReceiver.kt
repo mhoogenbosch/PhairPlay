@@ -11,7 +11,14 @@ import kotlinx.coroutines.launch
 import timber.log.Timber
 
 /**
- * BootReceiver — starts [PhairPlayService] on device boot if "Start on boot" is enabled.
+ * BootReceiver — starts [PhairPlayService] on device boot, and again after the app was updated,
+ * if "Start on boot" is enabled.
+ *
+ * MY_PACKAGE_REPLACED: an update (adb `install -r`, a sideloader) kills the process and nothing
+ * restarted the service, so the TV stopped being a receiver until someone opened the app — which
+ * meant an update had to bring the app to the front and interrupt whatever was playing. The system
+ * delivers this broadcast to the new version only, and it is one of the documented exemptions
+ * from the Android 12+ background foreground-service start restriction, like BOOT_COMPLETED.
  *
  * WHY: Android kills all services on reboot. For a receiver app to work without
  * the user manually reopening the app, we register for BOOT_COMPLETED.
@@ -34,9 +41,10 @@ import timber.log.Timber
 class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        val action = intent.action
+        if (action != Intent.ACTION_BOOT_COMPLETED && action != Intent.ACTION_MY_PACKAGE_REPLACED) return
 
-        Timber.d("BootReceiver: BOOT_COMPLETED received")
+        Timber.d("BootReceiver: $action received")
 
         // goAsync() extends the execution window beyond the 10-second BroadcastReceiver limit.
         val pendingResult: PendingResult = goAsync()
