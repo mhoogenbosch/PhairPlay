@@ -11,14 +11,14 @@
     ACCESS_NETWORK_STATE        — required to detect network changes (reconnect logic)
     FOREGROUND_SERVICE          — required for persistent background receiver service (Android 9+)
     FOREGROUND_SERVICE_CONNECTED_DEVICE — required for connectedDevice foreground service type (Android 14+)
-    CHANGE_WIFI_STATE           — required by WifiP2pManager for Miracast Wi-Fi Direct
-    ACCESS_FINE_LOCATION        — required by Wi-Fi P2P / Miracast discovery on Android 10+
     RECEIVE_BOOT_COMPLETED      — required for "start on boot" feature
 
     Explicitly NOT requested:
     - RECORD_AUDIO      (we receive audio, we do not record it)
     - READ/WRITE storage (we don't persist stream data)
     - CAMERA            (not needed)
+    - Wi-Fi Direct / location (Miracast was removed in this fork: a sideloaded app cannot
+      register as a Wi-Fi Display sink, setWfdInfo needs the system-only CONFIGURE_WIFI_DISPLAY)
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
@@ -43,12 +43,6 @@
     <!-- Foreground service — keeps receiver alive when app is in background -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
-
-    <!-- Miracast (Wi-Fi Direct / Wi-Fi P2P) -->
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
 
     <!-- Start on boot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -115,10 +109,11 @@
 
         <!--
             PhairPlayService — persistent foreground service that manages
-            AirPlay, Miracast, and Cast receivers.
+            AirPlay and Cast receivers.
 
             - foregroundServiceType="connectedDevice": required for Android 14+
-              when a foreground service manages a connected device (BT/Wi-Fi/P2P)
+              when a foreground service manages a connected device (BT/Wi-Fi). Android 14 accepts
+              CHANGE_WIFI_MULTICAST_STATE as the qualifying permission for this type.
             - exported="false": only started from within this app via ServiceController
             - START_STICKY: service restarts automatically if killed by the system
         -->

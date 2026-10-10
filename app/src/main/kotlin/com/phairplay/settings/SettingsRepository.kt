@@ -106,13 +106,12 @@ class SettingsRepository(private val context: Context) {
      */
     private fun Preferences.toAppSettings(): AppSettings {
         // Fall back to AppSettings.DEFAULT for unset keys — one source of truth for defaults, so a
-        // changed data-class default (e.g. Miracast/Cast off, start-on-boot on) actually takes effect
+        // changed data-class default (e.g. Cast off, start-on-boot on) actually takes effect
         // at runtime instead of being silently overridden by hardcoded fallbacks here.
         val d = AppSettings.DEFAULT
         return AppSettings(
             displayName        = this[Keys.DISPLAY_NAME]            ?: d.displayName,
             airPlayEnabled     = this[Keys.AIRPLAY_ENABLED]         ?: d.airPlayEnabled,
-            miracastEnabled    = this[Keys.MIRACAST_ENABLED]        ?: d.miracastEnabled,
             castEnabled        = this[Keys.CAST_ENABLED]            ?: d.castEnabled,
             airPlayPinAuthEnabled = this[Keys.AIRPLAY_PIN_AUTH]     ?: d.airPlayPinAuthEnabled,
             startOnBoot        = this[Keys.START_ON_BOOT]           ?: d.startOnBoot,
@@ -129,7 +128,6 @@ class SettingsRepository(private val context: Context) {
     private fun MutablePreferences.fromAppSettings(settings: AppSettings) {
         this[Keys.DISPLAY_NAME]         = settings.displayName
         this[Keys.AIRPLAY_ENABLED]      = settings.airPlayEnabled
-        this[Keys.MIRACAST_ENABLED]     = settings.miracastEnabled
         this[Keys.CAST_ENABLED]         = settings.castEnabled
         this[Keys.AIRPLAY_PIN_AUTH]     = settings.airPlayPinAuthEnabled
         this[Keys.START_ON_BOOT]        = settings.startOnBoot
@@ -147,7 +145,6 @@ class SettingsRepository(private val context: Context) {
     private object Keys {
         val DISPLAY_NAME        = stringPreferencesKey("display_name")
         val AIRPLAY_ENABLED     = booleanPreferencesKey("airplay_enabled")
-        val MIRACAST_ENABLED    = booleanPreferencesKey("miracast_enabled")
         val CAST_ENABLED        = booleanPreferencesKey("cast_enabled")
         val AIRPLAY_PIN_AUTH    = booleanPreferencesKey("airplay_pin_auth")
         val START_ON_BOOT       = booleanPreferencesKey("start_on_boot")
