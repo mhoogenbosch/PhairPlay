@@ -21,8 +21,13 @@ PhairPlay is a free, open-source, ad-free AirPlay 2 receiver for Android TV and 
 This is a **personal fork** ([mhoogenbosch/PhairPlay](https://github.com/mhoogenbosch/PhairPlay)) of
 [mazer666/PhairPlay](https://github.com/mazer666/PhairPlay), which I rebuilt **for my own home use
 only**. It is not an official build, carries no support or warranty, and is tailored to my own
-devices (a Nokia Streaming Box 8010 and a few Fire TV sticks) — your mileage may vary. Releases are
-versioned `X.Y.Z-mh.N` and built locally (no CI).
+devices (a Nokia Streaming Box 8010, a TCL and a Xiaomi Google TV, and five Fire TV sticks) — your
+mileage may vary.
+
+**Current release: [v1.1.0-mh.17](https://github.com/mhoogenbosch/PhairPlay/releases/latest)** (2026-10-10).
+Releases are versioned `1.1.0-mh.N` on top of upstream, titled `PhairPlay v1.1.0-mh.N — <what changed>`,
+and listed in [CHANGELOG.md](CHANGELOG.md). CI builds the release APKs unsigned; they are signed
+locally with one fixed key, so every release installs over the previous one (`adb install -r`).
 
 ### What this fork adds / changes
 - **iOS 26 screen mirroring works** — fixes for the RTSP body-size limit, a watchdog for the
@@ -37,6 +42,15 @@ versioned `X.Y.Z-mh.N` and built locally (no CI).
   UUID, so several TVs on one LAN don't collide as a single receiver.
 - **Headless display-name setter** — set the advertised device name over `adb` (broadcast intent),
   for scripted multi-device installs.
+- **Self-healing advertisement** — a watchdog, an mDNS self-probe and a periodic health check bring
+  the receiver back after a network drop or standby instead of leaving it invisible.
+- **Dead sessions are cleaned up** — a sender that disappears without closing the connection (TV into
+  standby while mirroring, phone off the Wi-Fi) is dropped after 30 s without NTP replies or as soon
+  as the network is lost, instead of blocking every new sender until a restart.
+- **Updates without interrupting** — after an update the receiver restarts itself
+  (`MY_PACKAGE_REPLACED`), so `adb install -r` never has to bring the app to the front.
+- **No black picture after Home or the screensaver** — the mirror decoder is rebuilt onto the new
+  Surface from the cached SPS/PPS; Back is ignored while mirroring (stop on the sender instead).
 - **On-device diagnostics** — an HTTP log dump (`:8001`) + live tail (`:8002`) and a persistent file
   log, so a receiver can be debugged without `adb logcat`.
 - **Sensible defaults for these TVs** — Cast off by default (redundant next to built-in
@@ -52,9 +66,9 @@ versioned `X.Y.Z-mh.N` and built locally (no CI).
 
 ---
 
-## Current Status — v1.0.0-beta.1
+## Current Status — v1.1.0-mh.17
 
-PhairPlay's AirPlay 2 receiver is fully implemented and available as a signed beta release. Download the APK directly from the [GitHub Releases page](https://github.com/mazer666/PhairPlay/releases).
+PhairPlay's AirPlay 2 receiver is fully implemented and runs daily on the TVs above. Download the APK from this fork's [Releases page](https://github.com/mhoogenbosch/PhairPlay/releases); upstream releases are on [mazer666/PhairPlay](https://github.com/mazer666/PhairPlay/releases).
 
 The AirPlay 2 stack is complete end-to-end: mDNS advertising, RTSP handshake, HomeKit-style pairing, FairPlay key decryption, H.264 mirroring, AAC-ELD/AAC-LC/ALAC audio, NTP A/V sync, and DACP reverse remote. Real-device validation with macOS and iOS senders is the current focus.
 
@@ -116,14 +130,18 @@ Google Cast receiver stack is in progress (control-plane implemented; media play
 
 ### Option A: Download a Release APK (easiest)
 
-Go to the [Releases page](https://github.com/mazer666/PhairPlay/releases) and download the APK for your device:
+Go to the [Releases page](https://github.com/mhoogenbosch/PhairPlay/releases) and download the APK for your device:
 
 | APK | Device |
 |-----|--------|
-| `PhairPlay-vX.Y.Z-googletv.apk` | Google TV, Android TV (Android 10+) |
-| `PhairPlay-vX.Y.Z-firetv.apk` | Amazon Fire TV (Android 7.1+) |
+| `PhairPlay-v1.1.0-mh.N-googletv.apk` | Google TV, Android TV (Android 10+) |
+| `PhairPlay-v1.1.0-mh.N-firetv.apk` | Amazon Fire TV (Android 7.1+) |
 
 Then install it via ADB (see the Sideloading Guide below) or a sideloading app like *Downloader* on Fire TV.
+
+**Updating:** `adb install -r <apk>` keeps the name and settings, and from mh.17 the receiver restarts
+by itself — nothing on screen changes. Going *to* mh.17 from an older version works the same way.
+Exception: TVs whose vendor blocks background service starts (TCL) need PhairPlay opened once.
 
 ### Option B: Build from Source
 
@@ -135,7 +153,7 @@ Then install it via ADB (see the Sideloading Guide below) or a sideloading app l
 
 2. **Clone the repository**
    ```bash
-   git clone https://github.com/mazer666/PhairPlay.git
+   git clone https://github.com/mhoogenbosch/PhairPlay.git
    cd PhairPlay
    ```
 
@@ -205,20 +223,21 @@ Then install it via ADB (see the Sideloading Guide below) or a sideloading app l
 
 ## How to Use
 
-1. Launch PhairPlay on your TV. You will see the Waiting Screen with your TV's name.
-2. On your Mac, click the **AirPlay** icon in the menu bar (or go to **System Preferences → Displays → AirPlay Display**).
-3. Select your TV from the list (it should appear as your TV's name).
-4. Your Mac's screen will appear on the TV instantly.
-5. To stop: click the AirPlay icon on your Mac and select "Turn Off AirPlay Mirroring", or just quit PhairPlay on the TV.
+1. Launch PhairPlay on your TV once. With *Start on boot* on (the default) it keeps advertising in the background from then on.
+2. **iPhone/iPad:** Control Center → **Screen Mirroring**, or the AirPlay button in an app. **Mac:** the **AirPlay** / Screen Mirroring icon in the menu bar.
+3. Select your TV from the list (it appears under the name set in PhairPlay).
+4. The TV switches to PhairPlay by itself and shows your screen; when you stop, it returns to what was on screen before.
+5. To stop: end mirroring on the sender.
 
 ---
 
 ## Known Limitations
 
-- **Beta software** — the AirPlay 2 stack is complete but real-device validation with various macOS/iOS senders is ongoing. Please report issues.
+- **Personal fork** — tested on the devices listed above with iPhones on iOS 26/27. Issues are welcome in [this fork](https://github.com/mhoogenbosch/PhairPlay/issues).
 - **Apple Music in-app audio is not decryptable.** macOS protects it with FairPlay on every AirPlay path. Route the Mac's system audio output instead (works fine).
 - **FairPlay-protected video** (Netflix, Disney+, Apple TV+) cannot be mirrored — this is Apple's DRM, not a PhairPlay limitation.
 - **Buffered audio (AirPlay 2 type 103)** is accepted but not yet played back.
+- **AirPlay video from the YouTube app** is not possible: it asks for `fp-setup2`, a FairPlay variant no open-source receiver implements (answered with `421`, like UxPlay). Mirroring YouTube shows a blank video layer (YouTube's own DRM choice). Use YouTube's Cast button.
 - **Google Cast** requires a registered Cast app ID for end-to-end testing; see [docs/guides/CAST_APP_ID.md](docs/guides/CAST_APP_ID.md).
 - If your router has **AP isolation** or **multicast filtering** enabled, PhairPlay may not appear in the AirPlay menu. Disable these settings on your router.
 - On very busy 2.4 GHz Wi-Fi networks, you may experience latency above 100 ms. Use 5 GHz or Ethernet for best results.
