@@ -211,9 +211,17 @@ class PhairPlayService : Service() {
             }
 
             override fun onLost(network: Network) {
-                // Nothing to do: the registration is already gone with the interface. Logged
-                // because it is the other half of the story when reading a diagnostic dump.
+                // The registration is already gone with the interface. Logged because it is the
+                // other half of the story when reading a diagnostic dump.
                 Logger.i("Network lost — mDNS advertisement is gone until it returns")
+                // A session still open now has a sender that can no longer reach us, and a sender
+                // on a link-local address keeps its TCP socket alive across the drop, so nothing
+                // would ever end it: every new sender got 503 after standby (#19). Only when no
+                // other network is left — losing a secondary network must not cut a live session.
+                val remaining = runCatching { cm.activeNetwork }.getOrNull()
+                if (remaining == null || remaining == network) {
+                    airPlayReceiver?.dropSession("network lost")
+                }
             }
         }
         runCatching { cm.registerNetworkCallback(request, callback) }

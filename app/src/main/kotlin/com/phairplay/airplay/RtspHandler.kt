@@ -95,6 +95,8 @@ open class RtspHandler(
 
     @Volatile
     private var activeClient: Socket? = null
+    /** Set by [dropActiveSession] so the resulting socket error is not logged as unexpected. */
+    @Volatile private var droppingSession = false
 
     /** The sender's PTTH reverse channel (`POST /reverse`), while open. Phase 1: logged only. */
     @Volatile
@@ -164,6 +166,23 @@ open class RtspHandler(
         activeClient = null
         serverSocket = null
         Logger.i("RTSP handler stopped")
+    }
+
+    /**
+     * Ends the active control connection, if any, as if the sender had closed it: the read in
+     * [handleClient] fails, its `finally` resets the session and fires onStreamingStopped, and
+     * port 7000 accepts a new sender again. For a sender that is known to be gone but never sent
+     * FIN — after the control socket went idle-timeout-free at SETUP nothing else would end it (#19).
+     *
+     * @return true when there was a connection to drop.
+     */
+    fun dropActiveSession(reason: String): Boolean {
+        val client = activeClient ?: return false
+        if (client.isClosed) return false
+        Logger.w("RTSP: dropping session with ${client.inetAddress.hostAddress} — $reason")
+        droppingSession = true
+        runCatching { client.close() }
+        return true
     }
 
     /**
@@ -281,8 +300,9 @@ open class RtspHandler(
             Logger.w("RTSP: no request from ${socket.inetAddress.hostAddress} for " +
                 "${PRE_SESSION_IDLE_TIMEOUT_MS / 1000}s before any stream was set up — dropping the connection")
         } catch (e: Exception) {
-            if (running) Logger.e("Error handling RTSP client", e)
+            if (running && !droppingSession) Logger.e("Error handling RTSP client", e)
         } finally {
+            droppingSession = false
             Logger.i("Client disconnected")
             socket.close()
             activeClient = null
