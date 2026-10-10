@@ -2,7 +2,7 @@
 <!--
     strings.xml — Nederlands (nl)
 
-    Same keys as res/values/strings.xml. Product and protocol names (PhairPlay, AirPlay, Miracast,
+    Same keys as res/values/strings.xml. Product and protocol names (PhairPlay, AirPlay,
     Google Cast, Wi-Fi) stay untranslated, as in the German and French files.
 -->
 <resources>
@@ -17,7 +17,6 @@
 
     <!-- ── Protocol names ──────────────────────────────────────── -->
     <string name="protocol_airplay">AirPlay</string>
-    <string name="protocol_miracast">Miracast</string>
     <string name="protocol_cast">Cast</string>
 
     <!-- ── Protocol states ─────────────────────────────────────── -->
@@ -49,7 +48,7 @@
 
     <!-- ── Notification ────────────────────────────────────────── -->
     <string name="notification_channel_name">PhairPlay-service</string>
-    <string name="notification_channel_description">Vaste melding voor de AirPlay/Miracast/Cast-ontvanger</string>
+    <string name="notification_channel_description">Vaste melding voor de AirPlay/Cast-ontvanger</string>
     <string name="notification_status_running">Ontvanger actief — zichtbaar op het netwerk</string>
     <string name="notification_status_stopped">Ontvanger gestopt</string>
     <string name="notification_status_streaming">Streamt vanaf %1$s</string>
@@ -70,8 +69,6 @@
     <string name="setting_display_name_collision_note">Geregistreerd als: %1$s</string>
     <string name="setting_airplay_enabled">AirPlay-ontvanger</string>
     <string name="setting_airplay_subtitle">Verbindingen van iPhone, iPad en Mac accepteren</string>
-    <string name="setting_miracast_enabled">Miracast-ontvanger</string>
-    <string name="setting_miracast_subtitle">Verbindingen van Windows en Android accepteren</string>
     <string name="setting_cast_enabled">Google Cast-ontvanger</string>
     <string name="setting_cast_subtitle">Verbindingen van Chrome en Android accepteren</string>
     <string name="setting_mirror_audio">Geluid bij synchroniseren</string>
@@ -103,7 +100,6 @@
     <!-- ── Error messages ──────────────────────────────────────── -->
     <string name="error_network_unavailable">Geen wifi-verbinding. Maak verbinding met wifi.</string>
     <string name="error_mdns_failed">Kan niet zichtbaar worden op het netwerk.</string>
-    <string name="error_wifi_p2p_unavailable">Miracast wordt niet ondersteund op dit apparaat.</string>
     <string name="error_cast_unavailable">Google Cast vereist Google Play-services (niet beschikbaar op dit apparaat).</string>
 
     <!-- ── Overlay permission banner ───────────────────────────── -->
@@ -112,7 +108,6 @@
 
     <!-- ── Accessibility ───────────────────────────────────────── -->
     <string name="content_desc_airplay_icon">AirPlay-protocolpictogram</string>
-    <string name="content_desc_miracast_icon">Miracast-protocolpictogram</string>
     <string name="content_desc_cast_icon">Google Cast-protocolpictogram</string>
     <string name="content_desc_status_dot">Statusindicator</string>
 

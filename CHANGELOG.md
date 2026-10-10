@@ -13,6 +13,16 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+### Removed
+- **Miracast receiver.** A sideloaded app cannot become a Wi-Fi Display sink: senders find a sink
+  through the WFD information element in Wi-Fi Direct frames, and `WifiP2pManager.setWfdInfo` needs
+  the system-only `CONFIGURE_WIFI_DISPLAY` permission. The inherited code advertised `_wfd._tcp`
+  over DNS-SD, ran the RTSP side as a server (in WFD the source is the server), and had no media
+  path — on these TVs it only ever showed an error card. Removed: `miracast/` package and tests,
+  the Home card, the Settings toggle, the stored setting, `Protocol.MIRACAST`, the icon/colour/
+  strings in all locales, and the `CHANGE_WIFI_STATE`, `ACCESS_COARSE_LOCATION`,
+  `ACCESS_FINE_LOCATION` and `NEARBY_WIFI_DEVICES` permissions. AirPlay and Cast are unchanged.
+
 ---
 
 ## [1.1.0-mh.14] - 2026-10-07

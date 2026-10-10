@@ -39,9 +39,12 @@ versioned `X.Y.Z-mh.N` and built locally (no CI).
   for scripted multi-device installs.
 - **On-device diagnostics** — an HTTP log dump (`:8001`) + live tail (`:8002`) and a persistent file
   log, so a receiver can be debugged without `adb logcat`.
-- **Sensible defaults for these TVs** — Miracast and Cast off by default (Miracast lacks the Wi-Fi
-  Direct permission on Google TV / Fire TV and errors; Cast is redundant next to built-in
+- **Sensible defaults for these TVs** — Cast off by default (redundant next to built-in
   Chromecast), AirPlay on, start-on-boot on.
+- **Miracast removed** — a sideloaded app cannot register as a Wi-Fi Display sink
+  (`WifiP2pManager.setWfdInfo` needs the system-only `CONFIGURE_WIFI_DISPLAY` permission), and the
+  upstream code had no media path anyway. Dropping it also drops the Wi-Fi Direct and location
+  permissions. Fire TV has a built-in Miracast receiver (*Display Mirroring*) if you need one.
 
 > **Note:** YouTube (and similar apps) blank their own video layer while screen-mirroring as a DRM
 > measure — that's the app's choice, not something a receiver can override. Use the app's native
@@ -55,7 +58,7 @@ PhairPlay's AirPlay 2 receiver is fully implemented and available as a signed be
 
 The AirPlay 2 stack is complete end-to-end: mDNS advertising, RTSP handshake, HomeKit-style pairing, FairPlay key decryption, H.264 mirroring, AAC-ELD/AAC-LC/ALAC audio, NTP A/V sync, and DACP reverse remote. Real-device validation with macOS and iOS senders is the current focus.
 
-Miracast and Google Cast receiver stacks are in progress (control-plane implemented; media playback pending).
+Google Cast receiver stack is in progress (control-plane implemented; media playback pending). Miracast is not part of this fork.
 
 ## Features
 
@@ -76,7 +79,6 @@ Miracast and Google Cast receiver stacks are in progress (control-plane implemen
 - Android TV / Fire TV app shell with foreground service and status UI
 - Mirror audio toggle and PIN-auth toggle in Settings
 - Works on Google TV (Android 10+) and Fire TV (Android 7+)
-- Miracast Wi-Fi Direct / WFD advertisement and RTSP control-plane
 - Google TV Cast Connect SDK lifecycle (full testing requires Cast app ID)
 - Zero ads, zero analytics, zero internet required
 - Open source — Apache 2.0 license
@@ -87,7 +89,8 @@ Miracast and Google Cast receiver stacks are in progress (control-plane implemen
 - **Apple Music in-app audio** — protected on every AirPlay path; use system audio output instead
 - **Buffered audio playback** (AirPlay 2 type 103) — accepted but not played back yet
 - **Cloud/remote streaming** — local network only
-- **Miracast / Cast media playback** — control plane is ready; media decode integration is in progress
+- **Cast media playback** — control plane is ready; media decode integration is in progress
+- **Miracast** — removed in this fork (not possible for a sideloaded app)
 
 ---
 
@@ -217,7 +220,6 @@ Then install it via ADB (see the Sideloading Guide below) or a sideloading app l
 - **FairPlay-protected video** (Netflix, Disney+, Apple TV+) cannot be mirrored — this is Apple's DRM, not a PhairPlay limitation.
 - **Buffered audio (AirPlay 2 type 103)** is accepted but not yet played back.
 - **Google Cast** requires a registered Cast app ID for end-to-end testing; see [docs/guides/CAST_APP_ID.md](docs/guides/CAST_APP_ID.md).
-- **Miracast** — Wi-Fi Direct and RTSP control plane work; MPEG-TS media decode is future work.
 - If your router has **AP isolation** or **multicast filtering** enabled, PhairPlay may not appear in the AirPlay menu. Disable these settings on your router.
 - On very busy 2.4 GHz Wi-Fi networks, you may experience latency above 100 ms. Use 5 GHz or Ethernet for best results.
 - **PIN auth is optional.** When disabled (default), any device on the same network can mirror to the TV. Enable PIN auth in Settings if you're on a shared network.

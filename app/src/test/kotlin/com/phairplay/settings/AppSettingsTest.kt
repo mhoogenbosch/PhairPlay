@@ -30,10 +30,9 @@ class AppSettingsTest {
 
     @Test
     fun `default settings enable AirPlay only`() {
-        // These are Google TV / Fire TV receivers: Miracast lacks the Wi-Fi Direct permission and
-        // errors, and Cast is redundant next to built-in Chromecast — so both default off.
+        // These are Google TV / Fire TV receivers: Cast is redundant next to built-in Chromecast, so it
+        // defaults off. (Miracast was removed from this fork altogether.)
         assertTrue(AppSettings.DEFAULT.airPlayEnabled)
-        assertFalse(AppSettings.DEFAULT.miracastEnabled)
         assertFalse(AppSettings.DEFAULT.castEnabled)
     }
 
@@ -88,31 +87,25 @@ class AppSettingsTest {
 
     @Test
     fun `anyProtocolEnabled is true when all protocols are enabled`() {
-        val settings = AppSettings(airPlayEnabled = true, miracastEnabled = true, castEnabled = true)
+        val settings = AppSettings(airPlayEnabled = true, castEnabled = true)
         assertTrue(settings.anyProtocolEnabled)
     }
 
     @Test
     fun `anyProtocolEnabled is true when only AirPlay is enabled`() {
-        val settings = AppSettings(airPlayEnabled = true, miracastEnabled = false, castEnabled = false)
-        assertTrue(settings.anyProtocolEnabled)
-    }
-
-    @Test
-    fun `anyProtocolEnabled is true when only Miracast is enabled`() {
-        val settings = AppSettings(airPlayEnabled = false, miracastEnabled = true, castEnabled = false)
+        val settings = AppSettings(airPlayEnabled = true, castEnabled = false)
         assertTrue(settings.anyProtocolEnabled)
     }
 
     @Test
     fun `anyProtocolEnabled is true when only Cast is enabled`() {
-        val settings = AppSettings(airPlayEnabled = false, miracastEnabled = false, castEnabled = true)
+        val settings = AppSettings(airPlayEnabled = false, castEnabled = true)
         assertTrue(settings.anyProtocolEnabled)
     }
 
     @Test
     fun `anyProtocolEnabled is false when all protocols are disabled`() {
-        val settings = AppSettings(airPlayEnabled = false, miracastEnabled = false, castEnabled = false)
+        val settings = AppSettings(airPlayEnabled = false, castEnabled = false)
         assertFalse(settings.anyProtocolEnabled)
     }
 
