@@ -13,6 +13,10 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ## [Unreleased]
 
+---
+
+## [1.1.0-mh.15] - 2026-10-10
+
 ### Removed
 - **Miracast receiver.** A sideloaded app cannot become a Wi-Fi Display sink: senders find a sink
   through the WFD information element in Wi-Fi Direct frames, and `WifiP2pManager.setWfdInfo` needs
