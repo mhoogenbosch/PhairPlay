@@ -43,7 +43,8 @@ locally with one fixed key, so every release installs over the previous one (`ad
 - **Headless display-name setter** — set the advertised device name over `adb` (broadcast intent),
   for scripted multi-device installs.
 - **Self-healing advertisement** — a watchdog, an mDNS self-probe and a periodic health check bring
-  the receiver back after a network drop or standby instead of leaving it invisible.
+  the receiver back after a network drop instead of leaving it invisible, and the advertisement is
+  re-announced when the TV wakes from standby (`SCREEN_ON`), not only when the network returns.
 - **Dead sessions are cleaned up** — a sender that disappears without closing the connection (TV into
   standby while mirroring, phone off the Wi-Fi) is dropped after 30 s without NTP replies or as soon
   as the network is lost, instead of blocking every new sender until a restart.
@@ -51,8 +52,8 @@ locally with one fixed key, so every release installs over the previous one (`ad
   (`MY_PACKAGE_REPLACED`), so `adb install -r` never has to bring the app to the front.
 - **No black picture after Home or the screensaver** — the mirror decoder is rebuilt onto the new
   Surface from the cached SPS/PPS; Back is ignored while mirroring (stop on the sender instead).
-- **On-device diagnostics** — an HTTP log dump (`:8001`) + live tail (`:8002`) and a persistent file
-  log, so a receiver can be debugged without `adb logcat`.
+- **On-device diagnostics** — an HTTP log dump (`:8001`, add `?full=1` for the persistent 5000-line
+  file) + live tail (`:8002`), so a receiver can be debugged without `adb logcat`.
 - **Sensible defaults for these TVs** — Cast off by default (redundant next to built-in
   Chromecast), AirPlay on, start-on-boot on.
 - **Miracast removed** — a sideloaded app cannot register as a Wi-Fi Display sink

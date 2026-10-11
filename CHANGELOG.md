@@ -15,6 +15,27 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.18] - 2026-10-11
+
+### Fixed
+- **The advertisement is refreshed when the TV wakes from standby** (#19). A standby log from a TV
+  on a USB Ethernet adapter showed the SoC suspending between maintenance windows ~17 minutes
+  apart: a 1.5 s timer fired 17 minutes late, every time, and each window re-registered mDNS and
+  was asleep again within two seconds — before the second announcement was due. What the iPhone
+  had cached expired overnight and nothing re-announced the receiver on wake, because Android never
+  reported the interface as lost. The service now listens for `SCREEN_ON` and re-advertises; the
+  wake-time network callback that may follow a few seconds later is coalesced into the same restart.
+  `SCREEN_OFF` is logged so a dump shows when standby began.
+- **The self-probe no longer claims LAN visibility.** Its answer comes from the local NSD cache
+  (1-2 ms), so it proves the registration is live and nothing more; the log line now says that.
+
+### Added
+- **`:8001/?full=1` serves the persistent log file** (up to 5000 lines, no VERBOSE) instead of the
+  500-line ring buffer. The ring buffer holds about 40 minutes of a TV that re-registers mDNS every
+  17 minutes, so an overnight incident had always scrolled out of it by morning.
+
+---
+
 ## [1.1.0-mh.17] - 2026-10-10
 
 ### Changed

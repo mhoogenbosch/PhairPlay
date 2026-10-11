@@ -5,13 +5,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.phairplay.MainActivity
 import com.phairplay.R
 import android.view.Surface
@@ -106,6 +109,16 @@ class PhairPlayService : Service() {
     // [registerNetworkCallback]. Null when never registered or already unregistered.
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
+    // Hears the TV wake up (and go to standby) — see [registerScreenStateReceiver]. Null when
+    // never registered or already unregistered.
+    private var screenStateReceiver: BroadcastReceiver? = null
+
+    // When [readvertise] last restarted the mDNS advertisement. A wake fires SCREEN_ON and, a
+    // few seconds later, a network callback for the returning interface; coalescing the two
+    // keeps NsdManager from seeing two unregister/register cycles back to back.
+    @Volatile
+    private var lastReadvertiseAt: Long = 0L
+
     // The display name currently applied to the live mDNS registration. Set by startReceivers();
     // the settings observer compares against it so a rename (from the UI or DisplayNameReceiver /
     // adb) re-registers mDNS live, and so it never restarts on the name it already advertises.
@@ -127,6 +140,7 @@ class PhairPlayService : Service() {
         DiagnosticServer.start(serviceScope)
         observeDisplayNameChanges()
         registerNetworkCallback()
+        registerScreenStateReceiver()
         startAirPlayHealthCheck()
     }
 
@@ -205,9 +219,7 @@ class PhairPlayService : Service() {
             .build()
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                if (_serviceState.value != ServiceState.Running) return
-                Logger.i("Network available — re-advertising over mDNS")
-                airPlayReceiver?.readvertise()
+                readvertise("Network available")
             }
 
             override fun onLost(network: Network) {
@@ -239,6 +251,68 @@ class PhairPlayService : Service() {
                 .onFailure { Logger.w("Could not unregister network callback: ${it.message}") }
         }
         networkCallback = null
+    }
+
+    /**
+     * Re-advertises over mDNS when the TV wakes from standby.
+     *
+     * A standby log from a TV on a USB Ethernet adapter (#19) showed the SoC suspending between
+     * maintenance windows ~17 min apart: a 1.5 s `postDelayed` fired 17 minutes late, every time,
+     * and each window re-registered mDNS and went back to sleep within two seconds — before the
+     * second announcement was due. Whatever the iPhone had cached expired overnight, and the
+     * record that would have refreshed it never left the device. The network callback does not
+     * fire on a plain wake (the interface was never "lost" from Android's point of view), so
+     * nothing re-announced the receiver until the app was restarted.
+     *
+     * `ACTION_SCREEN_ON` is what Android TV sends when the panel comes back; it can only be
+     * received by a receiver registered at runtime. The matching `SCREEN_OFF` is logged so a dump
+     * shows when standby began. The re-advertisement itself is coalesced with the network callback
+     * in [readvertise].
+     */
+    private fun registerScreenStateReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    Intent.ACTION_SCREEN_ON -> readvertise("Screen on (TV woke up)")
+                    Intent.ACTION_SCREEN_OFF -> Logger.i("Screen off — TV going into standby")
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+        }
+        runCatching {
+            ContextCompat.registerReceiver(this, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        }.onSuccess {
+            screenStateReceiver = receiver
+            Logger.d("Screen-state receiver registered for mDNS re-advertise on wake")
+        }.onFailure { Logger.e("Could not register screen-state receiver", it) }
+    }
+
+    private fun unregisterScreenStateReceiver() {
+        screenStateReceiver?.let { r ->
+            runCatching { unregisterReceiver(r) }
+                .onFailure { Logger.w("Could not unregister screen-state receiver: ${it.message}") }
+        }
+        screenStateReceiver = null
+    }
+
+    /**
+     * Restarts the mDNS advertisement for [reason], unless one was started less than
+     * [READVERTISE_COALESCE_MS] ago (a wake delivers SCREEN_ON and a network callback within
+     * seconds of each other; one restart covers both). A no-op while the service is not Running.
+     */
+    private fun readvertise(reason: String) {
+        if (_serviceState.value != ServiceState.Running) return
+        val now = System.currentTimeMillis()
+        if (now - lastReadvertiseAt < READVERTISE_COALESCE_MS) {
+            Logger.d("$reason — mDNS re-advertised ${now - lastReadvertiseAt} ms ago, not again")
+            return
+        }
+        lastReadvertiseAt = now
+        Logger.i("$reason — re-advertising over mDNS")
+        airPlayReceiver?.readvertise()
     }
 
     /**
@@ -318,6 +392,7 @@ class PhairPlayService : Service() {
     override fun onDestroy() {
         Logger.i("PhairPlayService destroying")
         unregisterNetworkCallback()
+        unregisterScreenStateReceiver()
         stopAllReceiversInternal()
         DiagnosticServer.stop()
         serviceJob.cancel()
@@ -637,6 +712,8 @@ class PhairPlayService : Service() {
         private const val HEALTH_CHECK_INTERVAL_MS = 5 * 60 * 1000L
         /** How long DISABLED/ERROR must persist before the health check acts on it. */
         private const val HEALTH_CHECK_MIN_AGE_MS = 60 * 1000L
+        /** Two re-advertise triggers closer together than this share one mDNS restart. */
+        private const val READVERTISE_COALESCE_MS = 5 * 1000L
         /** Intent extra marking that MainActivity was auto-opened for an incoming session. */
         const val EXTRA_AUTO_OPENED = "com.phairplay.extra.AUTO_OPENED_FOR_SESSION"
         const val ACTION_START    = "com.phairplay.action.START"
