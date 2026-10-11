@@ -559,7 +559,7 @@ class MdnsService(
         }
     }
 
-    // ─── Self-probe: is our own advertisement visible on the LAN? ────────────
+    // ─── Self-probe: does the local responder actually hold our advertisement? ──
 
     /**
      * Schedules [startSelfProbe] shortly after both registrations confirmed, giving the
@@ -577,8 +577,14 @@ class MdnsService(
     /**
      * Browses `_airplay._tcp` for [SELF_PROBE_TIMEOUT_MS] and checks that our own service name
      * is among the answers. A registration confirmed by NsdService only means the advertiser
-     * finished probing without a conflict; whether the records actually make it onto the wire
-     * (and back) is a separate question — and the one senders care about.
+     * finished probing without a conflict; this checks that the responder really serves the
+     * record afterwards (the stuck-DISABLED case of 2026-09-21).
+     *
+     * What it does NOT prove: that the record reaches the LAN. The answer comes from the local
+     * NsdService cache — typically within 1-2 ms, far too fast for a round trip over the wire — so
+     * a USB NIC that stopped receiving multicast after a resume (#19) still passes this probe.
+     * The log line says so, because an earlier wording ("visible on the LAN") sent a standby
+     * investigation the wrong way.
      *
      * Not visible → re-advertise (a fresh unregister/register cycle), at most
      * [MAX_SELF_PROBE_RESTARTS] times per process. After that the probe stops acting and only
@@ -597,7 +603,8 @@ class MdnsService(
             }
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
                 if (serviceInfo.serviceName == expectName && found.compareAndSet(false, true)) {
-                    Logger.i("mDNS self-probe: own advertisement '$expectName' is visible on the LAN")
+                    Logger.i("mDNS self-probe: '$expectName' answered by the local responder " +
+                             "(registration is live; says nothing about reach over the LAN)")
                     onSelfProbeResult(this, visible = true)
                 }
             }
