@@ -50,6 +50,8 @@ sourceSets {
                 // VMRuntime.newUnpaddedArray (JNI) — not available in the JVM.
                 // This test must run as an Android instrumented test on a real device.
                 "**/MdnsServiceTest.kt",
+                // Same reason: AirPlayReceiverSessionTest mocks NsdManager (via DacpClient).
+                "**/AirPlayReceiverSessionTest.kt",
                 // ServiceControllerTest triggers android.os.Build.<clinit> which calls
                 // SystemProperties.native_get (JNI) — not available in the JVM.
                 "**/ServiceControllerTest.kt",

@@ -103,6 +103,16 @@ class MdnsService(
     @Volatile
     private var isStarted = false
 
+    // Set by [stop]: this instance is finished for good. A stopped MdnsService must never register
+    // again — before mh.15 a pending restart fallback or a posted name-conflict retry could still
+    // fire after the receiver had stopped it and put a stale advertisement back on the network.
+    @Volatile
+    private var disposed = false
+
+    // Name-conflict retries posted by [retryOrFail]; cancelled on every teardown so a stale retry
+    // can't register an old attempt's listener over a fresh start.
+    private val pendingRetries = mutableListOf<Runnable>()
+
     // Used for delayed registration retries, watchdogs and the restart-timeout fallback.
     private val handler = Handler(Looper.getMainLooper())
 
@@ -152,6 +162,10 @@ class MdnsService(
      */
     @Synchronized
     fun start(displayNameOverride: String? = null) {
+        if (disposed) {
+            Logger.d("MdnsService.start() after stop() — ignoring (instance disposed)")
+            return
+        }
         if (isStarted) {
             Logger.w("MdnsService.start() called but already registered — ignoring")
             return
@@ -187,7 +201,22 @@ class MdnsService(
      */
     @Synchronized
     fun stop() {
+        disposed = true
+        // A restart in flight must not complete after this: drop its pending state and fallback.
+        restartPending = false
+        restartFallback?.let { handler.removeCallbacks(it) }
+        restartFallback = null
+        stopInternal()
+    }
+
+    /**
+     * The teardown half shared by [stop] and [restart]: unregisters both services and cancels every
+     * watchdog, retry and probe, but leaves a pending restart (and the multicast lock) alone.
+     */
+    @Synchronized
+    private fun stopInternal() {
         Logger.i("Stopping mDNS advertising")
+        cancelPendingRetries()
         cancelAllRegistrationWatchdogs()
         cancelAdvertiseWatchdog()
         stopSelfProbe()
@@ -236,12 +265,16 @@ class MdnsService(
      */
     @Synchronized
     fun restart(displayNameOverride: String? = null) {
+        if (disposed) {
+            Logger.d("mDNS restart ignored — service was stopped")
+            return
+        }
         Logger.d("Restarting mDNS advertising")
         restartFallback?.let { handler.removeCallbacks(it) }
         restartFallback = null
         restartDisplayName = displayNameOverride
         restartPending = true
-        stop()
+        stopInternal()
         if (pendingUnregistrations <= 0) {
             completeRestart("immediate")
         } else {
@@ -254,7 +287,7 @@ class MdnsService(
     /** Runs the deferred [restart] once unregistration completed (or timed out). */
     @Synchronized
     private fun completeRestart(reason: String) {
-        if (!restartPending) return
+        if (!restartPending || disposed) return
         restartPending = false
         restartFallback?.let { handler.removeCallbacks(it) }
         restartFallback = null
@@ -463,6 +496,12 @@ class MdnsService(
     }
 
     @Synchronized
+    private fun cancelPendingRetries() {
+        pendingRetries.forEach { handler.removeCallbacks(it) }
+        pendingRetries.clear()
+    }
+
+    @Synchronized
     private fun cancelAllRegistrationWatchdogs() {
         registrationWatchdogs.values.forEach { handler.removeCallbacks(it) }
         registrationWatchdogs.clear()
@@ -483,7 +522,14 @@ class MdnsService(
         if (attempt < MAX_NAME_ATTEMPTS && isStarted) {
             Logger.w("mDNS $serviceLabel registration failed (errorCode=$errorCode) — " +
                      "retrying with suffixed name (attempt ${attempt + 1}/$MAX_NAME_ATTEMPTS)")
-            handler.postDelayed({ if (isStarted) retry() }, RETRY_DELAY_MS)
+            val pending = object : Runnable {
+                override fun run() {
+                    synchronized(this@MdnsService) { pendingRetries.remove(this) }
+                    if (isStarted && !disposed) retry()
+                }
+            }
+            pendingRetries.add(pending)
+            handler.postDelayed(pending, RETRY_DELAY_MS)
         } else {
             Logger.e("mDNS $serviceLabel registration gave up after $attempt attempt(s) " +
                      "(errorCode=$errorCode) — receiver state ERROR")

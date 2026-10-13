@@ -33,6 +33,7 @@ class RtspHandlerTest {
     private var lastPhotoType: PhotoImageType? = null
     private var audioStopped = false
     private var videoStopped = false
+    private var lastKeepKeys: Boolean? = null
 
     @Before
     fun setup() {
@@ -44,6 +45,7 @@ class RtspHandlerTest {
         lastPhotoType = null
         audioStopped = false
         videoStopped = false
+        lastKeepKeys = null
     }
 
     // ─── OPTIONS ─────────────────────────────────────────────────────────────
@@ -254,6 +256,23 @@ class RtspHandlerTest {
         assertFalse("session with active streams must stay alive", streamingStopped)
     }
 
+    @Test
+    fun `TEARDOWN of the last stream stops media but keeps the session keys`() {
+        val handler = createTestHandler()
+        handler.seedActiveStreams(110)
+        handler.handleTeardownPublic(teardownRequest(teardownBody(110)))
+        assertTrue(streamingStopped)
+        assertEquals("last-stream teardown must keep keys/NTP for a re-SETUP", true, lastKeepKeys)
+    }
+
+    @Test
+    fun `session TEARDOWN is a full teardown`() {
+        val handler = createTestHandler()
+        handler.seedActiveStreams(96, 110)
+        handler.handleTeardownPublic(RtspRequest(method = "TEARDOWN", uri = "", headers = emptyMap(), body = ""))
+        assertEquals(false, lastKeepKeys)
+    }
+
     // ─── Unknown method ───────────────────────────────────────────────────────
 
     @Test
@@ -325,8 +344,7 @@ class RtspHandlerTest {
             streamingStarted = true
             lastSession = session
         },
-        onStreamingStopped = { streamingStopped = true }
-        ,
+        onStreamingStopped = { keepKeys -> streamingStopped = true; lastKeepKeys = keepKeys },
         onPhotoReceived = { _, imageType ->
             photoReceived = true
             lastPhotoType = imageType
@@ -383,7 +401,7 @@ class RtspHandlerTest {
  */
 class TestableRtspHandler(
     onStreamingStarted: (SessionDescription) -> Unit,
-    onStreamingStopped: () -> Unit,
+    onStreamingStopped: (Boolean) -> Unit,
     onPhotoReceived: (ByteArray, PhotoImageType) -> Unit = { _, _ -> },
     onPhotoCleared: () -> Unit = {},
     onMirrorAudioStop: () -> Unit = {},

@@ -52,8 +52,11 @@ class AirPlayVideoPlayer(
             player.setOnPreparedListener { onPrepared(it) }
             player.setOnCompletionListener { Logger.i("AirPlay video: completed"); onEnded() }
             player.setOnErrorListener { _, what, extra ->
-                Logger.e("AirPlay video error what=$what extra=$extra")
-                true   // handled — don't also fire onCompletion
+                Logger.e("AirPlay video error what=$what extra=$extra — ending the session")
+                // Returning true suppresses onCompletion, so end the session here exactly as
+                // completion would — otherwise the TV sat on a black CONNECTED screen.
+                onEnded()
+                true
             }
             player.setDataSource(url)
             player.prepareAsync()

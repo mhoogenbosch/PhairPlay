@@ -15,6 +15,27 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.20] - 2026-10-13
+
+### Fixed
+- **Every session ends properly, not just the first one.** The teardown guard was only re-armed by
+  the legacy RECORD path, so from the second mirror or AirPlay 2 audio session after a service start
+  the session end was a no-op: the UI stayed on CONNECTED, the NTP client and event socket leaked,
+  and mDNS was not restarted after the session. That includes the mh.16 teardown for a sender that
+  stopped answering NTP. Session state is now owned by the receiver (`sessionActive` + generation,
+  under one lock); every start (mirror keys, URL video, legacy RECORD) re-arms it, and only the
+  active-to-inactive transition emits ADVERTISING and restarts mDNS. Starting a server, NTP client or
+  event socket stops the previous instance first.
+- **mDNS can no longer override CONNECTED.** Advertisement state changes only reach the UI while no
+  session runs.
+- **`MdnsService.stop()` disposes the instance**: a pending restart, its fallback and queued
+  name-conflict retries are cancelled; start/restart afterwards are no-ops.
+- **Removing the last stream keeps the session keys**, NTP and event channel until the session
+  TEARDOWN or connection close, so a re-SETUP on the same connection works.
+- **A URL-video playback error ends the session** like normal completion.
+
+---
+
 ## [1.1.0-mh.19] - 2026-10-13
 
 ### Fixed
