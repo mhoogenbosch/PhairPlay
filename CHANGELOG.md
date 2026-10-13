@@ -15,6 +15,18 @@ its releases as `<semver>-mh.<n>` on top of the upstream
 
 ---
 
+## [1.1.0-mh.19] - 2026-10-13
+
+### Fixed
+- **The persistent log keeps a whole night again, also after a mirror session** (#19). A
+  `:8001/?full=1` dump spanned only ~2 hours: ~80% of its 5000 lines were the sender's
+  `RTSP POST /feedback` keep-alive (every 2 s) and the periodic `Audio stats` / `Video stats` /
+  `Mirror: sender` lines, so the standby night had scrolled out by morning. The keep-alive now stays
+  out of the file and each stats kind is written at most once a minute. The live tail on `:8002`
+  still shows every line.
+
+---
+
 ## [1.1.0-mh.18] - 2026-10-11
 
 ### Fixed
