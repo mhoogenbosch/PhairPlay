@@ -570,9 +570,11 @@ class AirPlayReceiver(
             }
         }
         // AirPlay 2 NTP is receiver-initiated: poll the sender's timing port so macOS proceeds.
-        val ntp = AirPlayNtpClient(remoteAddress, senderTimingPort, onSenderSilent = {
-            dropSession("sender stopped answering NTP timing requests")
-        }).also { ntpClient = it; it.start(scope) }
+        val ntp = AirPlayNtpClient(remoteAddress, senderTimingPort,
+            silenceTimeoutMs = ntpSilenceTimeoutMs, pollIntervalMs = ntpPollIntervalMs, onSenderSilent = {
+                ntpSilenceDrops.incrementAndGet()
+                dropSession("sender stopped answering NTP timing requests")
+            }).also { ntpClient = it; it.start(scope) }
         onSenderNameChanged(senderName ?: "AirPlay")
         emitState(ProtocolState.CONNECTED)
         Logger.i("Mirror keys set (sender='${senderName ?: "?"}'); eventPort=${event.localPort} timingPort=${ntp.localPort}")
@@ -777,6 +779,11 @@ class AirPlayReceiver(
     internal val hasEventSocket: Boolean get() = eventSocket != null
     internal val hasSessionKeys: Boolean get() = mirrorAesKey != null
     internal val isSessionActive: Boolean get() = sessionActive
+    /** NTP timing of new sessions; tests shorten it so a 30 s silence takes a second. */
+    internal var ntpSilenceTimeoutMs = AirPlayNtpClient.SENDER_SILENCE_TIMEOUT_MS
+    internal var ntpPollIntervalMs = 2000L
+    /** How often an NTP client declared its sender gone (each one drops the current session). */
+    internal val ntpSilenceDrops = java.util.concurrent.atomic.AtomicInteger()
 
     companion object {
         // Hint dimensions for MediaCodec configuration.

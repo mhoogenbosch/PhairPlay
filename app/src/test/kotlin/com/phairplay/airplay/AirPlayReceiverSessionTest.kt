@@ -13,7 +13,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.InetAddress
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * AirPlayReceiverSessionTest — session lifecycle of the receiver (mh.15).
@@ -129,5 +133,83 @@ class AirPlayReceiverSessionTest {
             listOf(ProtocolState.CONNECTED, ProtocolState.ADVERTISING, ProtocolState.DISABLED),
             snapshot()
         )
+    }
+
+    /**
+     * A fake iPhone timing port on loopback: counts the receiver's NTP requests and answers them
+     * while [answering] is true. When the iPhone ends a session it stops answering on that port.
+     */
+    private class FakeSender : AutoCloseable {
+        val socket = DatagramSocket(0, InetAddress.getLoopbackAddress())
+        val requests = AtomicInteger()
+        val answering = AtomicBoolean(true)
+        private val thread = Thread {
+            val buf = ByteArray(128)
+            while (!socket.isClosed) {
+                try {
+                    val p = DatagramPacket(buf, buf.size)
+                    socket.receive(p)
+                    requests.incrementAndGet()
+                    if (answering.get()) {
+                        val reply = ByteArray(32).also { it[0] = 0x80.toByte(); it[1] = 0xD3.toByte() }
+                        socket.send(DatagramPacket(reply, reply.size, p.address, p.port))
+                    }
+                } catch (_: Exception) { }
+            }
+        }.apply { isDaemon = true; start() }
+        val port: Int get() = socket.localPort
+        override fun close() = socket.close()
+    }
+
+    /**
+     * Replays #19 log6 (mh.18 on a Sony): the first mirror session after a service start ran fine,
+     * every later one was dropped after 6-23 s with "no timing reply from the sender for 32s",
+     * logged 0.15 s after a reply HAD arrived. The silent one was the previous session's NTP client:
+     * its teardown was a no-op, the client kept polling a port the iPhone had closed, and when it
+     * gave up it dropped whatever session was current. Here: two real NTP clients against two fake
+     * senders, with a 1.5 s silence timeout standing in for 30 s.
+     */
+    @Test
+    fun `a finished session's NTP client cannot drop the next session`() {
+        receiver.ntpSilenceTimeoutMs = 1_500
+        receiver.ntpPollIntervalMs = 100
+        FakeSender().use { first ->
+            FakeSender().use { second ->
+                receiver.startMirrorKeysForTest(sender, first.port, "iPhone")
+                receiver.startMirrorStreamForTest()
+                Thread.sleep(400)
+                assertTrue("session 1 must poll its sender", first.requests.get() > 0)
+
+                receiver.onStreamingStoppedForTest(keepKeys = false)   // iPhone: Stop Mirroring
+                first.answering.set(false)                              // ...and that port goes quiet
+                Thread.sleep(300)
+                val firstAfterStop = first.requests.get()
+
+                receiver.startMirrorKeysForTest(sender, second.port, "iPhone")
+                receiver.startMirrorStreamForTest()
+                Thread.sleep(2_500)                                     // well past the silence timeout
+
+                assertEquals("no session may be dropped for NTP silence", 0, receiver.ntpSilenceDrops.get())
+                assertTrue("session 2 must still be active", receiver.isSessionActive)
+                assertEquals("session 1's NTP client kept polling after its teardown",
+                    firstAfterStop, first.requests.get())
+                assertTrue("session 2 must poll its own sender", second.requests.get() > 10)
+                assertEquals(ProtocolState.CONNECTED, snapshot().last())
+            }
+        }
+    }
+
+    /** The mh.16 detector itself still works: a sender that really goes quiet is dropped once. */
+    @Test
+    fun `a sender that really stops answering is detected once`() {
+        receiver.ntpSilenceTimeoutMs = 1_000
+        receiver.ntpPollIntervalMs = 100
+        FakeSender().use { s ->
+            receiver.startMirrorKeysForTest(sender, s.port, "iPhone")
+            Thread.sleep(300)
+            s.answering.set(false)
+            Thread.sleep(2_000)
+            assertEquals(1, receiver.ntpSilenceDrops.get())
+        }
     }
 }
