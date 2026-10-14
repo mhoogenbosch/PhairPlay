@@ -24,7 +24,7 @@ only**. It is not an official build, carries no support or warranty, and is tail
 devices (a Nokia Streaming Box 8010, a TCL and a Xiaomi Google TV, and five Fire TV sticks) — your
 mileage may vary.
 
-**Current release: [v1.1.0-mh.17](https://github.com/mhoogenbosch/PhairPlay/releases/latest)** (2026-10-10).
+**Current release: [v1.1.0-mh.20](https://github.com/mhoogenbosch/PhairPlay/releases/latest)** (2026-10-13).
 Releases are versioned `1.1.0-mh.N` on top of upstream, titled `PhairPlay v1.1.0-mh.N — <what changed>`,
 and listed in [CHANGELOG.md](CHANGELOG.md). CI builds the release APKs unsigned; they are signed
 locally with one fixed key, so every release installs over the previous one (`adb install -r`).
