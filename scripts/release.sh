@@ -193,8 +193,11 @@ Side-load the APK that matches your device:
 Use [adb](https://developer.android.com/tools/adb) or a sideloading app like *Downloader* to install."
 
     # Determine if pre-release (contains a dash, e.g. v1.0.0-beta.1)
-    PRERELEASE_FLAG=""
-    [[ "$VERSION" == *-* ]] && PRERELEASE_FLAG="--prerelease"
+    # Pre-release only for -rc/-beta/-alpha tags. This fork versions every regular release as
+    # 1.1.0-mh.N, so "any dash" marked them all pre-release and "Latest" silently stayed behind
+    # (mh.18-mh.20, October 2026).
+    PRERELEASE_FLAG="--latest"
+    [[ "$VERSION" =~ -(rc|beta|alpha) ]] && PRERELEASE_FLAG="--prerelease"
 
     echo "▸ Publishing GitHub Release $VERSION..."
     gh release create "$VERSION" \

@@ -24,7 +24,7 @@ only**. It is not an official build, carries no support or warranty, and is tail
 devices (a Nokia Streaming Box 8010, a TCL and a Xiaomi Google TV, and five Fire TV sticks) — your
 mileage may vary.
 
-**Current release: [v1.1.0-mh.17](https://github.com/mhoogenbosch/PhairPlay/releases/latest)** (2026-10-10).
+**Current release: [v1.1.0-mh.20](https://github.com/mhoogenbosch/PhairPlay/releases/latest)** (2026-10-13).
 Releases are versioned `1.1.0-mh.N` on top of upstream, titled `PhairPlay v1.1.0-mh.N — <what changed>`,
 and listed in [CHANGELOG.md](CHANGELOG.md). CI builds the release APKs unsigned; they are signed
 locally with one fixed key, so every release installs over the previous one (`adb install -r`).
@@ -48,6 +48,9 @@ locally with one fixed key, so every release installs over the previous one (`ad
 - **Dead sessions are cleaned up** — a sender that disappears without closing the connection (TV into
   standby while mirroring, phone off the Wi-Fi) is dropped after 30 s without NTP replies or as soon
   as the network is lost, instead of blocking every new sender until a restart.
+- **Every session ends cleanly** — not just the first one after a service start: media, NTP client
+  and event channel are released and the TV returns to what it showed before. (Up to mh.19 a leaked
+  NTP client from the previous session could drop the next one after 10-20 s, #19.)
 - **Updates without interrupting** — after an update the receiver restarts itself
   (`MY_PACKAGE_REPLACED`), so `adb install -r` never has to bring the app to the front.
 - **No black picture after Home or the screensaver** — the mirror decoder is rebuilt onto the new
@@ -67,7 +70,7 @@ locally with one fixed key, so every release installs over the previous one (`ad
 
 ---
 
-## Current Status — v1.1.0-mh.17
+## Current Status — v1.1.0-mh.20
 
 PhairPlay's AirPlay 2 receiver is fully implemented and runs daily on the TVs above. Download the APK from this fork's [Releases page](https://github.com/mhoogenbosch/PhairPlay/releases); upstream releases are on [mazer666/PhairPlay](https://github.com/mazer666/PhairPlay/releases).
 
@@ -230,6 +233,34 @@ Exception: TVs whose vendor blocks background service starts (TCL) need PhairPla
 4. The TV switches to PhairPlay by itself and shows your screen; when you stop, it returns to what was on screen before.
 5. To stop: end mirroring on the sender.
 
+### Finding the TV after standby
+
+PhairPlay re-announces itself the moment the TV wakes, but it can only be **found while the TV is in
+standby** if the TV keeps its network up. Many TVs don't: in deep standby the SoC only wakes for short
+maintenance windows (a log from a Sony showed the network going down and coming back every ~17½ min),
+so an iPhone browsing at a random moment misses it. That is a TV setting, not something an app can
+change. Look for *Remote start*, *Networked standby*, *Wake on LAN/Wi-Fi* or *Quick start*.
+
+**USB Ethernet adapters need power in standby.** Some TVs have a 100 Mbit/s Ethernet port, so a USB
+Gigabit adapter is an attractive upgrade, but the TV may cut USB power in standby and the adapter goes
+down with it. Remote start alone did not help in that case. Verified setup, thanks to
+[@sigurdshilfe](https://github.com/mhoogenbosch/PhairPlay/issues/19):
+
+| | |
+|---|---|
+| TV | Sony X90J (built-in Ethernet limited to 100 Mbit/s) |
+| Adapter | RTL8153B USB Gigabit Ethernet, in the TV's USB 3.0 port, Cat 6 cable |
+| Required setting | **Provide power to USB during standby: ON** (reachable via Sony's Pro Mode; works in both Pro and Normal mode afterwards) |
+
+With that, the TV stayed discoverable after a full day in standby. A built-in casting app (e.g. Lebo)
+can stay installed: it advertises under its own name and does not conflict.
+
+### Reading the receiver's log
+
+Open `http://<tv-ip>:8001/?full=1` for the persistent log (up to 5000 lines; survives restarts) or
+`http://<tv-ip>:8002/` for a live tail. After a standby or discovery problem, grab `?full=1`
+**before** you start mirroring, so the night is still in it.
+
 ---
 
 ## Known Limitations
@@ -239,6 +270,11 @@ Exception: TVs whose vendor blocks background service starts (TCL) need PhairPla
 - **FairPlay-protected video** (Netflix, Disney+, Apple TV+) cannot be mirrored — this is Apple's DRM, not a PhairPlay limitation.
 - **Buffered audio (AirPlay 2 type 103)** is accepted but not yet played back.
 - **AirPlay video from the YouTube app** is not possible: it asks for `fp-setup2`, a FairPlay variant no open-source receiver implements (answered with `421`, like UxPlay). Mirroring YouTube shows a blank video layer (YouTube's own DRM choice). Use YouTube's Cast button.
+- **"AirPlay" in some video players is screen mirroring.** Players such as Senplayer use iOS's
+  *external display* mode: the iPhone decodes the file and re-encodes it to H.264 before sending, so
+  a heavy file (e.g. 8K60 VP9) stutters on the phone, not on the TV. The TV log then shows a mirror
+  session with zero dropped frames. For such files, play them on the TV itself (Kodi, Jellyfin) or
+  use a player that does real AirPlay video (`POST /play`, the TV fetches the URL).
 - **Google Cast** requires a registered Cast app ID for end-to-end testing; see [docs/guides/CAST_APP_ID.md](docs/guides/CAST_APP_ID.md).
 - If your router has **AP isolation** or **multicast filtering** enabled, PhairPlay may not appear in the AirPlay menu. Disable these settings on your router.
 - On very busy 2.4 GHz Wi-Fi networks, you may experience latency above 100 ms. Use 5 GHz or Ethernet for best results.
